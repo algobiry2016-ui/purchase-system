@@ -2174,8 +2174,17 @@ async function migrateVatToItemPrices(){
   const statusEl = $('migrateVatStatus');
   if(!sb){ toast('غير متصل بقاعدة البيانات — أدخل بيانات الاتصال أولًا'); return; }
 
-  // الفواتير المؤهّلة: الضريبة مفعّلة فيها، وفيها صنف واحد على الأقل بدون priceExVat (لم تُحدَّث من قبل)
-  const targets = invoices.filter(inv => inv.vatEnabled && (inv.items||[]).some(it => it.priceExVat == null));
+  // الفواتير المؤهّلة:
+  // 1) لم تُعالَج أبدًا (priceExVat غير موجودة)، أو
+  // 2) عولجت سابقًا لكن بدون أي زيادة فعلية بالسعر رغم وجود ضريبة على الفاتورة (حالة معطوبة تحتاج إعادة معالجة)
+  const targets = invoices.filter(inv => {
+    if(!inv.vatEnabled) return false;
+    if(!(num(inv.vatAmount) > 0)) return false;
+    return (inv.items||[]).some(it => {
+      if(it.priceExVat == null) return true;
+      return Math.abs(num(it.price) - num(it.priceExVat)) < 0.005;
+    });
+  });
   if(targets.length === 0){
     statusEl.textContent = 'لا توجد فواتير سابقة تحتاج تحديث.';
     toast('كل الفواتير محدَّثة بالفعل');
@@ -2185,10 +2194,10 @@ async function migrateVatToItemPrices(){
 
   $('btnMigrateVat').disabled = true;
   let done = 0, failed = 0;
+  const failedNumbers = [];
   for(const inv of targets){
     statusEl.textContent = `جاري التحديث... (${done+failed}/${targets.length})`;
     try{
-      // نحسب مبلغ الضريبة والإجمالي الأصلي (قبل الضريبة) لهذه الفاتورة من بياناتها المحفوظة نفسها
       const rawSubtotal = r2(inv.items.reduce((s,it)=> s + num(it.qty)*num(it.price), 0));
       const vatAmount = num(inv.vatAmount);
       const updatedItems = distributeVatToItems(
@@ -2196,22 +2205,34 @@ async function migrateVatToItemPrices(){
         vatAmount, rawSubtotal
       );
       const updatedInv = { ...inv, items: updatedItems };
-      const { error } = await sb.from(TABLE).update(invoiceToRow(updatedInv)).eq('id', inv.id);
+
+      // نطلب رجوع الصف المحفوظ فعليًا من الخادم للتحقق منه، لا نكتفي بغياب الخطأ
+      const { data, error } = await sb.from(TABLE).update(invoiceToRow(updatedInv)).eq('id', inv.id).select();
       if(error) throw error;
-      // تحديث النسخة المحلية بعد نجاح الحفظ بالخادم
+      if(!data || !data.length) throw new Error('لم يُرجع الخادم الصف بعد الحفظ');
+
+      // تحقق فعلي: هل السعر بالصف المحفوظ بالخادم ارتفع كما هو متوقع؟
+      const savedRow = data[0];
+      const savedItems = Array.isArray(savedRow.items) ? savedRow.items : [];
+      const stillBroken = savedItems.some(it => rawSubtotal>0 && Math.abs(num(it.price) - num(it.priceExVat)) < 0.005);
+      if(stillBroken){
+        throw new Error('الحفظ تم لكن السعر لم يتغيّر فعليًا بالخادم');
+      }
+
       const idx = invoices.findIndex(i=>i.id===inv.id);
-      if(idx > -1) invoices[idx] = updatedInv;
+      if(idx > -1) invoices[idx] = rowToInvoice(savedRow);
       done++;
     }catch(err){
       console.error('migrate error', inv.id, err);
+      failedNumbers.push(inv.number || inv.id);
       failed++;
     }
   }
   cacheLocally();
   if(typeof renderLog === 'function') renderLog();
   $('btnMigrateVat').disabled = false;
-  statusEl.textContent = `تم تحديث ${done} فاتورة${failed>0 ? ` — تعذّر تحديث ${failed}` : ''}.`;
-  toast(failed>0 ? `تم التحديث مع وجود ${failed} أخطاء` : 'تم تحديث الفواتير السابقة بنجاح');
+  statusEl.textContent = `تم تحديث ${done} فاتورة${failed>0 ? ` — تعذّر تحديث ${failed} (${failedNumbers.join('، ')})` : ''}.`;
+  toast(failed>0 ? `تم التحديث مع وجود ${failed} أخطاء — راجع رسالة الحالة` : 'تم تحديث الفواتير السابقة بنجاح');
 }
 $('btnMigrateVat').addEventListener('click', migrateVatToItemPrices);
 
