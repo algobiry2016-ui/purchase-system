@@ -392,9 +392,6 @@
             </div>
             <div class="field"><label>نسبة الضريبة %</label><input type="number" id="vatRate" min="0" step="0.01" value="15"></div>
           </div>
-          <div style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.7;">
-            ملاحظة: أدخل سعر الوحدة دائمًا <b>قبل الضريبة</b>. عند تفعيل الضريبة، يوزّعها النظام تلقائيًا على سعر كل صنف عند الحفظ (بدل إظهارها كبند منفصل)، وتُحفظ الأسعار شاملة الضريبة لأغراض متوسط وآخر سعر شراء.
-          </div>
           <div class="grid4" style="align-items:end;margin-top:14px;">
             <div class="field">
               <label>طريقة الدفع</label>
@@ -463,18 +460,6 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-head"><h2>تطبيق توزيع الضريبة على الفواتير السابقة</h2></div>
-        <div class="card-body">
-          <p style="margin:0 0 12px;font-size:13px;color:var(--muted);line-height:1.8;">
-            تحديث لمرة واحدة: يمرّ على كل الفواتير المحفوظة سابقًا التي كانت الضريبة مفعّلة فيها، ويوزّع مبلغ الضريبة على سعر كل صنف بداخلها (بدل عرضها كبند منفصل) — بنفس الطريقة المطبّقة الآن على الفواتير الجديدة. الفواتير المحدَّثة من قبل والفواتير بدون ضريبة لا تتأثر ولا تُعاد معالجتها.
-          </p>
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <button class="btn btn-outline" id="btnMigrateVat">تطبيق التحديث الآن</button>
-            <span id="migrateVatStatus" style="font-size:12.5px;color:var(--muted);"></span>
-          </div>
-        </div>
-      </div>
       <div class="card">
         <div class="card-head"><h2>نسخة احتياطية</h2></div>
         <div class="card-body">
@@ -1455,23 +1440,6 @@ function computeTotals(items, discType, discValue, vatOn, vatRate){
   return { subtotal, discountAmount, taxable, vatAmount, total, rate };
 }
 
-// توزيع مبلغ الضريبة على سعر كل صنف بنسبة قيمته من إجمالي الأصناف
-// (تُستخدم وقت الحفظ فقط — الأسعار أثناء الإدخال تبقى كما كتبها المستخدم قبل الضريبة)
-// priceExVat يحفظ السعر الأصلي قبل الضريبة حتى يمكن إعادته عند فتح الفاتورة للتعديل
-function distributeVatToItems(items, vatAmount, rawSubtotal){
-  if(!(vatAmount > 0) || !(rawSubtotal > 0)){
-    return items.map(it=>({ ...it, priceExVat: r2(num(it.price)) }));
-  }
-  const mult = 1 + (vatAmount / rawSubtotal);
-  return items.map(it=>{
-    const exVat = r2(num(it.price));
-    const qty = num(it.qty);
-    const newTotal = r2(qty * exVat * mult);
-    const newPrice = qty > 0 ? r2(newTotal / qty) : r2(exVat * mult);
-    return { ...it, priceExVat: exVat, price: newPrice, total: newTotal };
-  });
-}
-
 function readTotalsForm(){
   return {
     discType: $('discType').value,
@@ -1484,21 +1452,11 @@ function readTotalsForm(){
 function recalcInvoice(){
   const f = readTotalsForm();
   const t = computeTotals(currentItems, f.discType, f.discValue, f.vatOn, f.vatRate);
-  if(f.vatOn && t.vatAmount > 0){
-    const distributed = distributeVatToItems(currentItems, t.vatAmount, t.subtotal);
-    const subtotalDisplay = r2(distributed.reduce((s,it)=>s+num(it.total),0));
-    $('sumSubtotal').textContent = money(subtotalDisplay);
-    $('sumDiscount').textContent = (t.discountAmount>0 ? '− ' : '') + money(t.discountAmount);
-    $('sumTaxable').textContent  = money(r2(subtotalDisplay - t.discountAmount));
-    $('sumVatLabel').textContent = `منها ضريبة القيمة المضافة ${f.vatRate}% (مضمّنة داخل سعر كل صنف)`;
-    $('sumVat').textContent      = money(t.vatAmount);
-  } else {
-    $('sumSubtotal').textContent = money(t.subtotal);
-    $('sumDiscount').textContent = (t.discountAmount>0 ? '− ' : '') + money(t.discountAmount);
-    $('sumTaxable').textContent  = money(t.taxable);
-    $('sumVatLabel').textContent = 'ضريبة القيمة المضافة (غير مطبّقة)';
-    $('sumVat').textContent      = money(0);
-  }
+  $('sumSubtotal').textContent = money(t.subtotal);
+  $('sumDiscount').textContent = (t.discountAmount>0 ? '− ' : '') + money(t.discountAmount);
+  $('sumTaxable').textContent  = money(t.taxable);
+  $('sumVatLabel').textContent = f.vatOn ? `ضريبة القيمة المضافة ${f.vatRate}%` : 'ضريبة القيمة المضافة (غير مطبّقة)';
+  $('sumVat').textContent      = money(t.vatAmount);
   $('invoiceTotal').textContent= money(t.total);
   $('vatRate').disabled = !f.vatOn;
   recalcPayment(t.total);
@@ -1607,14 +1565,10 @@ function editInvoice(id){
   $('vatRate').value = inv.vatRate != null ? inv.vatRate : 15;
   $('payType').value = inv.paymentType || 'cash';
   $('paidAmount').value = inv.paidAmount != null ? inv.paidAmount : 0;
-  currentItems = inv.items.map(it=>{
-    // priceExVat = السعر الأصلي قبل الضريبة كما أُدخل أول مرة (الفواتير القديمة قبل هذه الميزة تُعامل كسعرها الحالي)
-    const exVat = it.priceExVat != null ? num(it.priceExVat) : num(it.price);
-    return {
-      name: it.name, category: it.category || '', unit: it.unit,
-      qty: num(it.qty), price: r2(exVat), total: r2(num(it.qty)*exVat)
-    };
-  });
+  currentItems = inv.items.map(it=>({
+    name: it.name, category: it.category || '', unit: it.unit,
+    qty: num(it.qty), price: num(it.price), total: r2(num(it.qty)*num(it.price))
+  }));
   renderItemsTable();
   enterEditMode(inv);
 
@@ -1708,12 +1662,6 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
   const now = new Date().toISOString();
   const isEdit = !!editingId;
 
-  const rawItemsForSave = currentItems.map(it=>({
-    name: it.name.trim(), category: it.category || '', unit: it.unit,
-    qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price))
-  }));
-  const itemsForSave = distributeVatToItems(rawItemsForSave, f.vatOn ? t.vatAmount : 0, t.subtotal);
-
   const invoice = {
     id: isEdit ? editingId : ('inv_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
     number: $('invNumber').value.trim(),
@@ -1721,7 +1669,10 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
     supplier: $('invSupplier').value.trim(),
     rep: $('invRep').value.trim(),
     notes: $('invNotes').value.trim(),
-    items: itemsForSave,
+    items: currentItems.map(it=>({
+      name: it.name.trim(), category: it.category || '', unit: it.unit,
+      qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price))
+    })),
     subtotal: t.subtotal,
     discountType: f.discType,
     discountValue: r2(f.discValue),
@@ -1865,8 +1816,7 @@ function rowToInvoice(r){
     unit: it.unit || '',
     qty: num(it.qty),
     price: num(it.price),
-    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
-    priceExVat: it.priceExVat != null ? num(it.priceExVat) : null
+    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price))
   }));
   const computedSub = r2(items.reduce((s,it)=>s+it.total,0));
   const subtotal = r.subtotal != null ? r2(num(r.subtotal)) : computedSub;
@@ -1907,8 +1857,7 @@ function invoiceToRow(inv){
   const items = (inv.items||[]).map(it=>({
     name: it.name || '', category: it.category || '', unit: it.unit || '',
     qty: r2(num(it.qty)), price: r2(num(it.price)),
-    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
-    priceExVat: r2(num(it.priceExVat != null ? it.priceExVat : it.price))
+    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price))
   }));
   const subtotal = inv.subtotal != null ? r2(num(inv.subtotal)) : r2(items.reduce((s,it)=>s+it.total,0));
   const discountAmount = r2(num(inv.discountAmount));
@@ -2168,73 +2117,6 @@ function exportBackup(){
 
 $('btnExportBackup').addEventListener('click', exportBackup);
 $('btnImportBackup').addEventListener('click', ()=> $('importFileInput').click());
-
-// ---- تحديث لمرة واحدة: توزيع الضريبة على أسعار الأصناف بالفواتير السابقة ----
-async function migrateVatToItemPrices(){
-  const statusEl = $('migrateVatStatus');
-  if(!sb){ toast('غير متصل بقاعدة البيانات — أدخل بيانات الاتصال أولًا'); return; }
-
-  // الفواتير المؤهّلة:
-  // 1) لم تُعالَج أبدًا (priceExVat غير موجودة)، أو
-  // 2) عولجت سابقًا لكن بدون أي زيادة فعلية بالسعر رغم وجود ضريبة على الفاتورة (حالة معطوبة تحتاج إعادة معالجة)
-  const targets = invoices.filter(inv => {
-    if(!inv.vatEnabled) return false;
-    if(!(num(inv.vatAmount) > 0)) return false;
-    return (inv.items||[]).some(it => {
-      if(it.priceExVat == null) return true;
-      return Math.abs(num(it.price) - num(it.priceExVat)) < 0.005;
-    });
-  });
-  if(targets.length === 0){
-    statusEl.textContent = 'لا توجد فواتير سابقة تحتاج تحديث.';
-    toast('كل الفواتير محدَّثة بالفعل');
-    return;
-  }
-  if(!confirm(`سيتم تحديث ${targets.length} فاتورة (توزيع الضريبة على أسعار أصنافها). لا يمكن التراجع عن هذا تلقائيًا بعد الحفظ. متابعة؟`)) return;
-
-  $('btnMigrateVat').disabled = true;
-  let done = 0, failed = 0;
-  const failedNumbers = [];
-  for(const inv of targets){
-    statusEl.textContent = `جاري التحديث... (${done+failed}/${targets.length})`;
-    try{
-      const rawSubtotal = r2(inv.items.reduce((s,it)=> s + num(it.qty)*num(it.price), 0));
-      const vatAmount = num(inv.vatAmount);
-      const updatedItems = distributeVatToItems(
-        inv.items.map(it=>({ name:it.name, category:it.category||'', unit:it.unit, qty:it.qty, price:it.price, total:it.total })),
-        vatAmount, rawSubtotal
-      );
-      const updatedInv = { ...inv, items: updatedItems };
-
-      // نطلب رجوع الصف المحفوظ فعليًا من الخادم للتحقق منه، لا نكتفي بغياب الخطأ
-      const { data, error } = await sb.from(TABLE).update(invoiceToRow(updatedInv)).eq('id', inv.id).select();
-      if(error) throw error;
-      if(!data || !data.length) throw new Error('لم يُرجع الخادم الصف بعد الحفظ');
-
-      // تحقق فعلي: هل السعر بالصف المحفوظ بالخادم ارتفع كما هو متوقع؟
-      const savedRow = data[0];
-      const savedItems = Array.isArray(savedRow.items) ? savedRow.items : [];
-      const stillBroken = savedItems.some(it => rawSubtotal>0 && Math.abs(num(it.price) - num(it.priceExVat)) < 0.005);
-      if(stillBroken){
-        throw new Error('الحفظ تم لكن السعر لم يتغيّر فعليًا بالخادم');
-      }
-
-      const idx = invoices.findIndex(i=>i.id===inv.id);
-      if(idx > -1) invoices[idx] = rowToInvoice(savedRow);
-      done++;
-    }catch(err){
-      console.error('migrate error', inv.id, err);
-      failedNumbers.push(inv.number || inv.id);
-      failed++;
-    }
-  }
-  cacheLocally();
-  if(typeof renderLog === 'function') renderLog();
-  $('btnMigrateVat').disabled = false;
-  statusEl.textContent = `تم تحديث ${done} فاتورة${failed>0 ? ` — تعذّر تحديث ${failed} (${failedNumbers.join('، ')})` : ''}.`;
-  toast(failed>0 ? `تم التحديث مع وجود ${failed} أخطاء — راجع رسالة الحالة` : 'تم تحديث الفواتير السابقة بنجاح');
-}
-$('btnMigrateVat').addEventListener('click', migrateVatToItemPrices);
 
 $('importFileInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
@@ -2631,9 +2513,10 @@ function renderLog(){
           </tbody>
         </table>
         <div class="sum-block" style="margin-top:12px;border:1px solid var(--line);border-radius:5px;">
-          <div class="sum-row"><span>إجمالي الأصناف${inv.vatEnabled ? ' (شامل الضريبة)' : ''}</span><b>${money(r2((inv.items||[]).reduce((s,it)=>s+num(it.total),0)))}</b></div>
+          <div class="sum-row"><span>إجمالي الأصناف</span><b>${money(inv.subtotal)}</b></div>
           <div class="sum-row"><span>الخصم${inv.discountType==='percent' ? ` (${r2(inv.discountValue)}%)` : ''}</span><b>${inv.discountAmount>0?'− ':''}${money(inv.discountAmount)}</b></div>
-          <div class="sum-row"><span>${inv.vatEnabled ? `منها ضريبة القيمة المضافة ${r2(inv.vatRate)}% (مضمّنة داخل سعر كل صنف)` : 'ضريبة القيمة المضافة (غير مطبّقة)'}</span><b>${money(inv.vatAmount)}</b></div>
+          <div class="sum-row"><span>الإجمالي بعد الخصم</span><b>${money(r2(inv.subtotal - inv.discountAmount))}</b></div>
+          <div class="sum-row"><span>${inv.vatEnabled ? `ضريبة القيمة المضافة ${r2(inv.vatRate)}%` : 'ضريبة القيمة المضافة (غير مطبّقة)'}</span><b>${money(inv.vatAmount)}</b></div>
           <div class="sum-row grand"><span>الإجمالي النهائي</span><b>${money(inv.total)}</b></div>
           <div class="sum-row"><span>المدفوع (${payTypeLabel(inv.paymentType)})</span><b>${money(inv.paidAmount||0)}</b></div>
           <div class="sum-row"><span>المتبقي على المورد</span><b style="color:${r2(inv.total-(inv.paidAmount||0))>0?'var(--clay)':'var(--forest)'};">${money(r2(inv.total-(inv.paidAmount||0)))}</b></div>
@@ -2751,21 +2634,17 @@ function purchaseLines(opts){
     if(f.month && inv.date.slice(0,7) !== f.month) return;
     if(f.supplier && itemKey(inv.supplier) !== itemKey(f.supplier)) return;
 
-    // مجموع الأصناف الفعلي لهذه الفاتورة (يطابق أساس سعر الصنف سواء كان شاملًا للضريبة أو لا)
-    const sub = r2(inv.items.reduce((s,x)=> s + num(x.qty)*num(x.price), 0));
+    const sub = inv.subtotal || 0;
     inv.items.forEach(it=>{
       if(f.item && itemKey(it.name) !== itemKey(f.item)) return;
       if(f.category && itemKey(it.category||'') !== itemKey(f.category)) return;
       if(f.unit && it.unit !== f.unit) return;
       const lineTotal = r2(num(it.qty)*num(it.price));
-      // توزيع الخصم (وكذلك الضريبة في الفواتير القديمة اللي ما توزّعها على السعر) بنسبة قيمة كل صنف
+      // توزيع الخصم والضريبة (إن وُجدت في فواتير قديمة) على الأصناف بنسبة قيمتها
       // حتى يطابق مجموع التقرير المبلغ المدفوع فعليًا
-      // ملاحظة: في الفواتير الحديثة priceExVat موجودة يعني الضريبة أصلًا مضمّنة داخل it.price
-      // فلا نضيفها مرة ثانية هنا تجنبًا لاحتسابها مرتين
-      const hasEmbeddedVat = it.priceExVat != null;
       const share = sub > 0 ? lineTotal/sub : 0;
       const discShare = r2((inv.discountAmount||0) * share);
-      const vatShare  = hasEmbeddedVat ? 0 : r2((inv.vatAmount||0) * share);
+      const vatShare  = r2((inv.vatAmount||0) * share);
       const net = r2(lineTotal - discShare + vatShare);
       // نصيب هذا الصنف من المدفوع نقدًا ومن المتبقي آجلًا
       const payRatio = inv.total > 0 ? (num(inv.paidAmount) / inv.total) : 1;
