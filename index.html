@@ -1866,7 +1866,7 @@ function rowToInvoice(r){
     qty: num(it.qty),
     price: num(it.price),
     total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
-    priceExVat: it.priceExVat != null ? num(it.priceExVat) : num(it.price)
+    priceExVat: it.priceExVat != null ? num(it.priceExVat) : null
   }));
   const computedSub = r2(items.reduce((s,it)=>s+it.total,0));
   const subtotal = r.subtotal != null ? r2(num(r.subtotal)) : computedSub;
