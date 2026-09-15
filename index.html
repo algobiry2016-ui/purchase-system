@@ -1440,6 +1440,25 @@ function computeTotals(items, discType, discValue, vatOn, vatRate){
   return { subtotal, discountAmount, taxable, vatAmount, total, rate };
 }
 
+// توزيع الخصم والضريبة معًا على سعر كل صنف بنسبة قيمته من إجمالي الأصناف
+// يعطي "سعر الوحدة الصافي" الفعلي (التكلفة الحقيقية بعد الخصم وشامل الضريبة)
+// priceEntered يحفظ السعر كما كتبه المستخدم أول مرة (قبل أي تعديل) حتى يمكن استرجاعه عند التعديل
+function netUnitPriceItems(items, discountAmount, vatAmount, rawSubtotal){
+  if(!(rawSubtotal > 0) || (!(discountAmount > 0) && !(vatAmount > 0))){
+    return items.map(it=>({ ...it, priceEntered: r2(num(it.price)) }));
+  }
+  // كل صنف يتأثر بنفس النسبة المئوية (مثبت رياضيًا: الخصم والضريبة يتوزعان بالتساوي
+  // كنسبة من قيمة كل صنف، بغض النظر عن الأصناف الثانية بالفاتورة)
+  const mult = 1 + (vatAmount - discountAmount) / rawSubtotal;
+  return items.map(it=>{
+    const entered = r2(num(it.price));
+    const qty = num(it.qty);
+    const newTotal = r2(qty * entered * mult);
+    const newPrice = qty > 0 ? r2(newTotal / qty) : r2(entered * mult);
+    return { ...it, priceEntered: entered, price: newPrice, total: newTotal };
+  });
+}
+
 function readTotalsForm(){
   return {
     discType: $('discType').value,
@@ -1565,10 +1584,13 @@ function editInvoice(id){
   $('vatRate').value = inv.vatRate != null ? inv.vatRate : 15;
   $('payType').value = inv.paymentType || 'cash';
   $('paidAmount').value = inv.paidAmount != null ? inv.paidAmount : 0;
-  currentItems = inv.items.map(it=>({
-    name: it.name, category: it.category || '', unit: it.unit,
-    qty: num(it.qty), price: num(it.price), total: r2(num(it.qty)*num(it.price))
-  }));
+  currentItems = inv.items.map(it=>{
+    const entered = it.priceEntered != null ? num(it.priceEntered) : num(it.price);
+    return {
+      name: it.name, category: it.category || '', unit: it.unit,
+      qty: num(it.qty), price: r2(entered), total: r2(num(it.qty)*entered)
+    };
+  });
   renderItemsTable();
   enterEditMode(inv);
 
@@ -1662,6 +1684,12 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
   const now = new Date().toISOString();
   const isEdit = !!editingId;
 
+  const rawItemsForSave = currentItems.map(it=>({
+    name: it.name.trim(), category: it.category || '', unit: it.unit,
+    qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price))
+  }));
+  const itemsForSave = netUnitPriceItems(rawItemsForSave, t.discountAmount, t.vatAmount, t.subtotal);
+
   const invoice = {
     id: isEdit ? editingId : ('inv_' + Date.now() + '_' + Math.random().toString(36).slice(2,7)),
     number: $('invNumber').value.trim(),
@@ -1669,10 +1697,7 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
     supplier: $('invSupplier').value.trim(),
     rep: $('invRep').value.trim(),
     notes: $('invNotes').value.trim(),
-    items: currentItems.map(it=>({
-      name: it.name.trim(), category: it.category || '', unit: it.unit,
-      qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price))
-    })),
+    items: itemsForSave,
     subtotal: t.subtotal,
     discountType: f.discType,
     discountValue: r2(f.discValue),
@@ -1816,7 +1841,8 @@ function rowToInvoice(r){
     unit: it.unit || '',
     qty: num(it.qty),
     price: num(it.price),
-    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price))
+    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
+    priceEntered: it.priceEntered != null ? num(it.priceEntered) : null
   }));
   const computedSub = r2(items.reduce((s,it)=>s+it.total,0));
   const subtotal = r.subtotal != null ? r2(num(r.subtotal)) : computedSub;
@@ -1857,7 +1883,8 @@ function invoiceToRow(inv){
   const items = (inv.items||[]).map(it=>({
     name: it.name || '', category: it.category || '', unit: it.unit || '',
     qty: r2(num(it.qty)), price: r2(num(it.price)),
-    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price))
+    total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
+    priceEntered: it.priceEntered != null ? r2(num(it.priceEntered)) : r2(num(it.price))
   }));
   const subtotal = inv.subtotal != null ? r2(num(inv.subtotal)) : r2(items.reduce((s,it)=>s+it.total,0));
   const discountAmount = r2(num(inv.discountAmount));
@@ -2634,18 +2661,21 @@ function purchaseLines(opts){
     if(f.month && inv.date.slice(0,7) !== f.month) return;
     if(f.supplier && itemKey(inv.supplier) !== itemKey(f.supplier)) return;
 
-    const sub = inv.subtotal || 0;
+    // مجموع الأصناف الفعلي (يطابق أساس سعر الصنف سواء كان خامًا أو صافيًا بعد التوزيع)
+    const sub = r2(inv.items.reduce((s,x)=> s + num(x.qty)*num(x.price), 0));
     inv.items.forEach(it=>{
       if(f.item && itemKey(it.name) !== itemKey(f.item)) return;
       if(f.category && itemKey(it.category||'') !== itemKey(f.category)) return;
       if(f.unit && it.unit !== f.unit) return;
       const lineTotal = r2(num(it.qty)*num(it.price));
-      // توزيع الخصم والضريبة (إن وُجدت في فواتير قديمة) على الأصناف بنسبة قيمتها
-      // حتى يطابق مجموع التقرير المبلغ المدفوع فعليًا
+      // priceEntered موجودة يعني سعر هذا الصنف صار من الأصل صافي (شامل حصته من
+      // الخصم والضريبة) — نعتمد على "total" المحفوظ مباشرة (أدق من إعادة ضرب
+      // الكمية بالسعر المقرَّب) ولا نضيف الخصم/الضريبة مرة ثانية
+      const hasNetPrice = it.priceEntered != null;
       const share = sub > 0 ? lineTotal/sub : 0;
-      const discShare = r2((inv.discountAmount||0) * share);
-      const vatShare  = r2((inv.vatAmount||0) * share);
-      const net = r2(lineTotal - discShare + vatShare);
+      const discShare = hasNetPrice ? 0 : r2((inv.discountAmount||0) * share);
+      const vatShare  = hasNetPrice ? 0 : r2((inv.vatAmount||0) * share);
+      const net = hasNetPrice ? r2(num(it.total)) : r2(lineTotal - discShare + vatShare);
       // نصيب هذا الصنف من المدفوع نقدًا ومن المتبقي آجلًا
       const payRatio = inv.total > 0 ? (num(inv.paidAmount) / inv.total) : 1;
       const paidShare = r2(net * payRatio);
