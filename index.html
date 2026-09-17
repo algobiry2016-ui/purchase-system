@@ -485,7 +485,14 @@
       <div class="card">
         <div class="card-head">
           <h2>سجل الفواتير</h2>
-          <input type="text" id="logSearch" placeholder="بحث برقم الفاتورة أو المورد" style="width:220px;padding:7px 10px;font-size:13px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="logBranchFilter" style="display:none;padding:7px 10px;font-size:13px;border:1px solid var(--line);border-radius:4px;">
+              <option value="">كل الفروع</option>
+              <option value="الرئيسي">الرئيسي</option>
+              <option value="الرياض">الرياض</option>
+            </select>
+            <input type="text" id="logSearch" placeholder="بحث برقم الفاتورة أو المورد" style="width:220px;padding:7px 10px;font-size:13px;">
+          </div>
         </div>
         <div class="card-body" id="logBody" style="padding:16px;"></div>
       </div>
@@ -572,6 +579,15 @@
                 <button class="btn btn-outline" id="btnFltMonth" style="flex:1;padding:9px;font-size:12.5px;">هذا الشهر</button>
                 <button class="btn btn-outline" id="btnFltClear" style="flex:1;padding:9px;font-size:12.5px;">مسح الفلاتر</button>
               </div>
+            </div>
+          </div>
+          <div id="reportsBranchFilterWrap" style="display:none;margin-top:14px;max-width:260px;">
+            <div class="field"><label>الفرع</label>
+              <select id="fltBranch">
+                <option value="">كل الفروع</option>
+                <option value="الرئيسي">الرئيسي</option>
+                <option value="الرياض">الرياض</option>
+              </select>
             </div>
           </div>
         </div>
@@ -2021,13 +2037,18 @@ function applySession(session){
 function applyBranchUI(){
   const wrap = $('branchFieldWrap');
   const sel = $('invBranch');
-  if(!wrap || !sel) return;
-  if(currentUserBranch !== 'all'){
-    sel.value = currentUserBranch;
-    sel.disabled = true;
-  } else {
-    sel.disabled = false;
+  if(sel && wrap){
+    if(currentUserBranch !== 'all'){
+      sel.value = currentUserBranch;
+      sel.disabled = true;
+    } else {
+      sel.disabled = false;
+    }
   }
+  // فلاتر الفرع بالسجل والتقارير تظهر فقط لحسابات الإدارة (اللي تشوف كل الفروع)
+  const showBranchFilters = currentUserBranch === 'all';
+  if($('logBranchFilter')) $('logBranchFilter').style.display = showBranchFilters ? '' : 'none';
+  if($('reportsBranchFilterWrap')) $('reportsBranchFilterWrap').style.display = showBranchFilters ? '' : 'none';
 }
 
 async function doLogin(){
@@ -2555,8 +2576,10 @@ $('btnExportBalancesXlsx').addEventListener('click', ()=>exportBalances('xlsx'))
 // ---- log ----
 function renderLog(){
   const q = ($('logSearch').value||'').trim().toLowerCase();
+  const branchSel = $('logBranchFilter') ? $('logBranchFilter').value : '';
   const list = invoices
     .filter(inv => !q || inv.number.toLowerCase().includes(q) || inv.supplier.toLowerCase().includes(q))
+    .filter(inv => !branchSel || (inv.branch || DEFAULT_BRANCH) === branchSel)
     .sort((a,b)=> (b.savedAt||'').localeCompare(a.savedAt||''));
 
   if(list.length===0){
@@ -2632,6 +2655,7 @@ function renderEditLog(inv){
 }
 
 $('logSearch').addEventListener('input', renderLog);
+$('logBranchFilter').addEventListener('change', renderLog);
 
 // ---- إلغاء / إعادة تفعيل الفاتورة (لا تُحذف من النظام) ----
 async function setInvoiceStatus(id, status){
@@ -2700,7 +2724,8 @@ function readFilters(){
     supplier: $('fltSupplier').value.trim(),
     item: $('fltItem').value.trim(),
     category: $('fltCategory').value.trim(),
-    unit: $('fltUnit').value
+    unit: $('fltUnit').value,
+    branch: $('fltBranch') ? $('fltBranch').value : ''
   };
 }
 
@@ -2715,6 +2740,7 @@ function purchaseLines(opts){
     if(f.day  && inv.date !== f.day) return;
     if(f.month && inv.date.slice(0,7) !== f.month) return;
     if(f.supplier && itemKey(inv.supplier) !== itemKey(f.supplier)) return;
+    if(f.branch && (inv.branch || DEFAULT_BRANCH) !== f.branch) return;
 
     // مجموع الأصناف الفعلي (يطابق أساس سعر الصنف سواء كان خامًا أو صافيًا بعد التوزيع)
     const sub = r2(inv.items.reduce((s,x)=> s + num(x.qty)*num(x.price), 0));
@@ -3072,7 +3098,7 @@ $('topItemsMetric').addEventListener('change', renderTopItems);
 const monthNamesAr = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 
 // ---- ربط عناصر الفلاتر ----
-['fltFrom','fltTo','fltSupplier','fltItem','fltCategory','fltUnit'].forEach(id=>{
+['fltFrom','fltTo','fltSupplier','fltItem','fltCategory','fltUnit','fltBranch'].forEach(id=>{
   $(id).addEventListener('input', ()=>{ renderStats(); renderRange(); });
   $(id).addEventListener('change', ()=>{ renderStats(); renderRange(); });
 });
@@ -3099,6 +3125,7 @@ $('btnFltMonth').addEventListener('click', ()=>{
 $('btnFltClear').addEventListener('click', ()=>{
   ['fltFrom','fltTo','fltSupplier','fltItem','fltCategory'].forEach(id=> $(id).value='');
   $('fltUnit').value='';
+  if($('fltBranch')) $('fltBranch').value='';
   renderStats(); renderRange();
 });
 
