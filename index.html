@@ -336,6 +336,15 @@
             <div class="field"><label>اسم المورد</label><input type="text" id="invSupplier" placeholder="مؤسسة التوريدات" list="supplierList"></div>
             <div class="field"><label>مندوب المشتريات</label><input type="text" id="invRep" placeholder="اسم المندوب"></div>
           </div>
+          <div class="grid2" id="branchFieldWrap" style="margin-top:14px;">
+            <div class="field">
+              <label>الفرع</label>
+              <select id="invBranch">
+                <option value="الرئيسي">الرئيسي</option>
+                <option value="الرياض">الرياض</option>
+              </select>
+            </div>
+          </div>
           <div class="field" style="margin-top:14px;">
             <label>ملاحظات</label>
             <textarea id="invNotes" rows="2" placeholder="ملاحظات على الفاتورة (اختياري)"
@@ -697,6 +706,23 @@ const SUPABASE_URL = 'https://eolnpozfksejyfkdcpuz.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_1Lcx6NE0zKb-xrvH1K4cYA_DeJCaJd7';
 const TABLE = 'invoices';
 /* ========================================================== */
+
+// ---- إعدادات الفروع ----
+// هذي الحسابات ترى كل الفروع (إدارة/مالك)
+const OWNER_EMAILS = ['algobiry2016@gmail.com', 'dm.flowers11@gmail.com'];
+// موظف فرع معيّن يقتصر عرضه على فرعه فقط
+const BRANCH_BY_EMAIL = {
+  'ahmeddmflowers@gmail.com': 'الرياض',
+};
+const DEFAULT_BRANCH = 'الرئيسي';
+let currentUserEmail = '';
+let currentUserBranch = 'all';
+function branchForEmail(email){
+  const e = (email||'').trim().toLowerCase();
+  if(OWNER_EMAILS.map(x=>x.toLowerCase()).includes(e)) return 'all';
+  // أي حساب غير مصنَّف صراحة يُعامل كموظف فرع رئيسي افتراضيًا (الأأمن)، لا يشوف كل شي بالغلط
+  return BRANCH_BY_EMAIL[e] || DEFAULT_BRANCH;
+}
 
 const STORE_KEY   = 'purchasing:invoices';   // نسخة محلية للعرض عند انقطاع الإنترنت
 const CONN_STORE  = 'purchasing:conn';
@@ -1531,6 +1557,8 @@ function clearForm(){
   $('invNumber').value=''; $('invSupplier').value=''; $('invRep').value='';
   $('invNotes').value='';
   $('invDate').valueAsDate = new Date();
+  if($('invBranch')) $('invBranch').value = (currentUserBranch !== 'all') ? currentUserBranch : DEFAULT_BRANCH;
+  applyBranchUI();
   $('payType').value='cash'; $('paidAmount').value='0';
   currentItems = [];
   $('itName').value=''; $('itQty').value=''; $('itPrice').value=''; $('itCategory').value='';
@@ -1578,6 +1606,8 @@ function editInvoice(id){
   $('invSupplier').value = inv.supplier;
   $('invRep').value = inv.rep || '';
   $('invNotes').value = inv.notes || '';
+  if($('invBranch')) $('invBranch').value = inv.branch || DEFAULT_BRANCH;
+  applyBranchUI();
   $('discType').value = inv.discountType || 'amount';
   $('discValue').value = inv.discountValue || 0;
   $('vatEnabled').value = inv.vatEnabled ? 'yes' : 'no';
@@ -1697,6 +1727,7 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
     supplier: $('invSupplier').value.trim(),
     rep: $('invRep').value.trim(),
     notes: $('invNotes').value.trim(),
+    branch: (currentUserBranch !== 'all') ? currentUserBranch : ($('invBranch').value || DEFAULT_BRANCH),
     items: itemsForSave,
     subtotal: t.subtotal,
     discountType: f.discType,
@@ -1876,7 +1907,8 @@ function rowToInvoice(r){
     savedAt: r.saved_at || new Date().toISOString(),
     updatedAt: r.updated_at || r.saved_at || '',
     createdBy: r.created_by || '',
-    editLog: Array.isArray(r.edit_log) ? r.edit_log : []
+    editLog: Array.isArray(r.edit_log) ? r.edit_log : [],
+    branch: r.branch || DEFAULT_BRANCH
   };
 }
 function invoiceToRow(inv){
@@ -1916,7 +1948,8 @@ function invoiceToRow(inv){
     saved_at: inv.savedAt || new Date().toISOString(),
     updated_at: inv.updatedAt || new Date().toISOString(),
     created_by: inv.createdBy || userName || '',
-    edit_log: Array.isArray(inv.editLog) ? inv.editLog : []
+    edit_log: Array.isArray(inv.editLog) ? inv.editLog : [],
+    branch: inv.branch || DEFAULT_BRANCH
   };
 }
 
@@ -1974,10 +2007,27 @@ function applySession(session){
   let stored = '';
   try{ stored = localStorage.getItem(USER_STORE) || ''; }catch(err){}
   userName = stored || meta.full_name || meta.name || (user.email||'').split('@')[0];
+  currentUserEmail = (user.email || '').trim().toLowerCase();
+  currentUserBranch = branchForEmail(currentUserEmail);
   document.body.classList.add('authed');
   if($('acctLabel')) $('acctLabel').value = user.email || '';
   if($('userNameInput')) $('userNameInput').value = userName;
+  applyBranchUI();
   return true;
+}
+
+// يضبط واجهة اختيار الفرع حسب صلاحية المستخدم الحالي:
+// موظف فرع معيّن يشوف حقل الفرع مقفول على فرعه، والمالك (all) يقدر يختار بحرية
+function applyBranchUI(){
+  const wrap = $('branchFieldWrap');
+  const sel = $('invBranch');
+  if(!wrap || !sel) return;
+  if(currentUserBranch !== 'all'){
+    sel.value = currentUserBranch;
+    sel.disabled = true;
+  } else {
+    sel.disabled = false;
+  }
 }
 
 async function doLogin(){
@@ -2041,7 +2091,11 @@ async function pullInvoices(silent){
   try{
     const { data, error } = await sb.from(TABLE).select('*').order('saved_at', { ascending:false });
     if(error) throw error;
-    invoices = (data || []).map(rowToInvoice);
+    let rows = (data || []).map(rowToInvoice);
+    if(currentUserBranch !== 'all'){
+      rows = rows.filter(inv => (inv.branch || DEFAULT_BRANCH) === currentUserBranch);
+    }
+    invoices = rows;
     online = true;
     cacheLocally();
     refreshDatalists();
@@ -2519,6 +2573,7 @@ function renderLog(){
       <summary>
         <span class="lnum">#${escapeHtml(inv.number)}</span>
         <span class="lsupplier">${escapeHtml(inv.supplier)}
+          ${currentUserBranch === 'all' ? `<span class="badge" style="background:#EEE3D3;color:#6B4F2A;">${escapeHtml(inv.branch || DEFAULT_BRANCH)}</span>` : ''}
           ${cancelled ? '<span class="badge badge-cancel">ملغاة</span>' : ''}
           ${!cancelled && due > 0 ? `<span class="badge badge-due">آجل ${due.toFixed(2)}</span>` : ''}
           ${edited ? `<span class="badge badge-edit">مُعدَّلة ${inv.editLog.length}×</span>` : ''}
