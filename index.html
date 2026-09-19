@@ -485,13 +485,13 @@
       <div class="card">
         <div class="card-head">
           <h2>سجل الفواتير</h2>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <select id="logBranchFilter" style="display:none;padding:7px 10px;font-size:13px;border:1px solid var(--line);border-radius:4px;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select id="logBranchFilter" style="display:none;padding:7px 10px;font-size:13px;border:1px solid var(--line);border-radius:4px;flex:1 1 110px;min-width:110px;">
               <option value="">كل الفروع</option>
               <option value="الرئيسي">الرئيسي</option>
               <option value="الرياض">الرياض</option>
             </select>
-            <input type="text" id="logSearch" placeholder="بحث برقم الفاتورة أو المورد" style="width:220px;padding:7px 10px;font-size:13px;">
+            <input type="text" id="logSearch" placeholder="بحث برقم الفاتورة أو المورد" style="flex:2 1 180px;min-width:180px;padding:7px 10px;font-size:13px;">
           </div>
         </div>
         <div class="card-body" id="logBody" style="padding:16px;"></div>
