@@ -2805,6 +2805,22 @@ function groupByItem(lines){
   return arr;
 }
 
+// الرصيد الآجل الحقيقي الحالي (بعد خصم كل السدادات اللاحقة) للموردين اللي فواتيرهم
+// ضمن الفلاتر الحالية (المورد/الفرع) — لا يتأثر بفلتر التاريخ عمدًا، لأن الرصيد المستحق
+// حالة حيّة دائمة، مو رقم يخص فترة معيّنة
+function creditOutstanding(f){
+  const matched = activeInvoices().filter(inv=>{
+    if(f.branch && (inv.branch||DEFAULT_BRANCH) !== f.branch) return false;
+    if(f.supplier && itemKey(inv.supplier) !== itemKey(f.supplier)) return false;
+    return true;
+  });
+  const names = new Map();
+  matched.forEach(inv=>{ if(inv.supplier) names.set(itemKey(inv.supplier), inv.supplier); });
+  let total = 0;
+  names.forEach(name=>{ total = r2(total + supplierBalance(name).balance); });
+  return total;
+}
+
 // ---- المؤشرات العلوية (تتغير حسب الفلاتر) ----
 function renderStats(){
   const f = readFilters();
@@ -2812,7 +2828,7 @@ function renderStats(){
   const invIds = new Set(lines.map(l=>l.invoiceId));
   const net   = r2(lines.reduce((s,l)=>s+l.total,0));
   const cash  = r2(lines.reduce((s,l)=>s+l.paidShare,0));
-  const credit= r2(lines.reduce((s,l)=>s+l.dueShare,0));
+  const credit= creditOutstanding(f);
   const qty   = r2(lines.reduce((s,l)=>s+l.qty,0));
   const items = new Set(lines.map(l=>l.key));
 
