@@ -3689,7 +3689,40 @@ async function syncReceipts(){
     if(Object.keys(adminUpd).length){
       try{ await invRef.update(adminUpd); }catch(err){ console.warn('receipts admin flags', err); }
     }
+    if(isAdmin() && online) await purgeOrphanReceipts();
   }finally{ invSyncing = false; }
+}
+
+// تنظيف تلقائي (الإدارة فقط): توريد فاتورته انحذفت من المشتريات ← ينحذف من المخزون مع حركاته.
+// يتأكد من Supabase مباشرة إن الفاتورة فعلًا غير موجودة قبل أي حذف.
+let orphanCheckedAt = 0;
+async function purgeOrphanReceipts(){
+  if(!sb || Date.now() - orphanCheckedAt < 60000) return;
+  const known = new Set(invoices.map(i=>i.id));
+  const candIds = [...new Set(Object.values(stockReceipts)
+    .filter(r=> r && r.id && r.invoiceId && !known.has(r.invoiceId))
+    .map(r=> r.invoiceId))];
+  orphanCheckedAt = Date.now();
+  if(!candIds.length) return;
+  let existing;
+  try{
+    const { data, error } = await sb.from(TABLE).select('id').in('id', candIds);
+    if(error) throw error;
+    existing = new Set((data||[]).map(r=> r.id));
+  }catch(err){ console.warn('orphan check', err); return; }
+  const gone = candIds.filter(id=> !existing.has(id));
+  if(!gone.length) return;
+  const upd = {}; let cnt = 0;
+  Object.values(stockReceipts).forEach(r=>{
+    if(!r || !gone.includes(r.invoiceId)) return;
+    upd['receipts/' + r.id] = null; cnt++;
+    if(r.status === 'confirmed'){
+      const count = Array.isArray(r.parts) && r.parts.length ? r.parts.length : 1;
+      for(let k=0;k<count;k++) upd['moves/' + r.id + '_' + k] = null;
+    }
+  });
+  try{ await invRef.update(upd); toast(`تم تنظيف ${cnt} توريد لفواتير محذوفة من المخزون`); }
+  catch(err){ console.error('orphan purge', err); }
 }
 // حذف الفاتورة = حذف توريداتها من المخزون، ولو كانت مستلمة تنحذف حركات الوارد معها (خصم من الرصيد)
 async function purgeReceiptsForInvoice(invId){
