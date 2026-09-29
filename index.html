@@ -2761,11 +2761,20 @@ async function deleteInvoice(e, id){
   e.preventDefault();
   if(!isAdmin()){ toast('حذف الفواتير من صلاحية الإدارة فقط'); return; }
   if(!sb){ toast('غير متصل بقاعدة البيانات'); return; }
-  if(!confirm('حذف هذه الفاتورة نهائيًا من القاعدة المشتركة؟ سيختفي عند جميع الموظفين.')) return;
+  const invRcs = Object.values(stockReceipts).filter(r=> r && r.invoiceId === id);
+  const invObj = invoices.find(i=>i.id===id);
+  const hasStock = invObj && (invObj.items||[]).some(it=> it.stock === true);
+  if(hasStock && !invReady){ toast('اربط المخزون أولًا — الفاتورة فيها أصناف مخزنية لازم تنحذف من المخزون معها'); return; }
+  const recvd = invRcs.filter(r=> r.status === 'confirmed');
+  const msg = 'حذف هذه الفاتورة نهائيًا من القاعدة المشتركة؟ سيختفي عند جميع الموظفين.'
+    + (invRcs.length ? '\n\nوبتنحذف توريداتها من نظام المخزون أيضًا.' : '')
+    + (recvd.length ? `\n\n⚠ فيه ${recvd.length} صنف مستلم بالمخزون — كمياته بتنخصم من الرصيد: `
+        + recvd.map(r=> (r.parts||[]).map(p=>`${p.name} ${p.qty}`).join('، ') || r.name).join(' | ') : '');
+  if(!confirm(msg)) return;
   try{
     const { error } = await sb.from(TABLE).delete().eq('id', id);
     if(error) throw error;
-    await cancelReceiptsForInvoice(id);
+    await purgeReceiptsForInvoice(id);
     await pullInvoices(true);
     renderLog();
   }catch(err){
@@ -3681,6 +3690,22 @@ async function syncReceipts(){
       try{ await invRef.update(adminUpd); }catch(err){ console.warn('receipts admin flags', err); }
     }
   }finally{ invSyncing = false; }
+}
+// حذف الفاتورة = حذف توريداتها من المخزون، ولو كانت مستلمة تنحذف حركات الوارد معها (خصم من الرصيد)
+async function purgeReceiptsForInvoice(invId){
+  if(!invReady || !invRef) return;
+  const upd = {};
+  Object.values(stockReceipts).forEach(r=>{
+    if(!r || r.invoiceId !== invId) return;
+    upd['receipts/' + r.id] = null;
+    if(r.status === 'confirmed'){
+      const count = Array.isArray(r.parts) && r.parts.length ? r.parts.length : 1;
+      for(let k=0;k<count;k++) upd['moves/' + r.id + '_' + k] = null;
+    }
+  });
+  if(!Object.keys(upd).length) return;
+  try{ await invRef.update(upd); toast('انحذفت الفاتورة وتوريداتها من المخزون'); }
+  catch(err){ console.error('purge receipts', err); toast('انحذفت الفاتورة لكن تعذّر حذفها من المخزون — بلّغني'); }
 }
 async function cancelReceiptsForInvoice(invId){
   if(!invReady || !invRef) return;
