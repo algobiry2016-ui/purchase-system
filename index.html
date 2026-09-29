@@ -9,6 +9,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <style>
   :root{
     --ink:#182420;
@@ -175,6 +178,24 @@
   .rep-total{display:flex;justify-content:space-between;padding:13px 18px;background:#F7F8F4;border-top:1px solid var(--line);font-size:14px;}
   .rep-total b{color:var(--forest);font-size:17px;font-feature-settings:"tnum" 1;}
   .mini-actions{display:flex;gap:6px;}
+  /* ربط المخزون */
+  .stk{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;}
+  .stk.wait{background:#F2EDD4;color:#8A6D0B;}
+  .stk.ok{background:#E3EEDD;color:#2F5A22;}
+  .stk.no{background:#EEF0EA;color:var(--muted);font-weight:600;}
+  .stk.bad{background:#F6DFD8;color:var(--clay);}
+  .stk-note{display:block;font-size:11px;color:var(--muted);margin-top:3px;white-space:normal;}
+  select.cell.need{border-color:var(--clay);background:#FDF4F1;}
+  .badge-stock{background:#F2EDD4;color:#8A6D0B;}
+  #invState{font-size:11.5px;color:#B9C2B9;border:1px solid #3A5145;padding:2px 8px;border-radius:3px;background:transparent;font-family:inherit;cursor:default;}
+  #invState.off{color:#F0B9A6;border-color:#7A4433;cursor:pointer;}
+  #invLinkModal{position:fixed;inset:0;background:rgba(18,39,32,.55);display:none;align-items:center;justify-content:center;z-index:10000;padding:18px;}
+  #invLinkModal .box{background:#fff;border-radius:6px;max-width:380px;width:100%;padding:20px;border-top:3px solid var(--gold);}
+  #invLinkModal h3{margin:0 0 6px;font-size:16px;color:var(--forest);}
+  #invLinkModal p{margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.7;}
+  #invLinkErr{color:var(--clay);font-size:12.5px;min-height:1.2em;margin-top:8px;}
+  .flaglog{font-size:12.5px;}
+  .flaglog td{white-space:normal;}
   .mini-actions button{padding:5px 10px;font-size:12px;border-radius:4px;border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit;color:var(--ink);}
   .mini-actions button:hover{border-color:var(--forest);}
   .mini-actions button.danger{color:var(--clay);}
@@ -269,6 +290,7 @@
           <span id="syncDot" style="width:8px;height:8px;border-radius:50%;background:#8A9488;display:inline-block;flex:none;"></span>
           <span id="syncLabel" style="font-size:12px;color:#B9C2B9;">جارٍ الاتصال…</span>
           <button id="btnSyncNow" style="background:transparent;border:1px solid #3A5145;color:#B9C2B9;font-family:inherit;font-size:11.5px;padding:2px 8px;border-radius:3px;cursor:pointer;">تحديث</button>
+          <button id="invState" type="button" title="ربط نظام المخزون">المخزون…</button>
         </div>
       </div>
     </div>
@@ -374,9 +396,9 @@
         </div>
 
         <table class="items-table">
-          <thead><tr><th>الصنف</th><th style="width:150px;">التصنيف</th><th style="width:120px;">الوحدة</th><th style="width:100px;">الكمية</th><th style="width:120px;">سعر الوحدة</th><th>إجمالي الصنف</th><th style="width:55px;"></th></tr></thead>
+          <thead><tr><th>الصنف</th><th style="width:150px;">التصنيف</th><th style="width:120px;">الوحدة</th><th style="width:100px;">الكمية</th><th style="width:120px;">سعر الوحدة</th><th>إجمالي الصنف</th><th style="width:110px;">مخزني</th><th style="width:55px;"></th></tr></thead>
           <tbody id="itemsBody">
-            <tr class="empty-row"><td colspan="7">لم تتم إضافة أي صنف بعد</td></tr>
+            <tr class="empty-row"><td colspan="8">لم تتم إضافة أي صنف بعد</td></tr>
           </tbody>
         </table>
       </div>
@@ -711,6 +733,18 @@
   </main>
 </div>
 
+<div id="invLinkModal">
+  <div class="box">
+    <h3>ربط نظام المخزون</h3>
+    <p id="invLinkMsg"></p>
+    <div class="field"><label>كلمة المرور</label><input type="password" id="invLinkPass" dir="ltr" autocomplete="current-password" placeholder="••••••••"></div>
+    <div id="invLinkErr"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn btn-primary" id="btnInvLink" style="flex:1;">ربط</button>
+      <button class="btn" id="btnInvLater">لاحقًا</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -769,6 +803,12 @@ let userName = '';
 let pollTimer = null;
 let editingId = null;       // معرّف الفاتورة الجاري تعديلها (null = فاتورة جديدة)
 let editingOriginal = null; // نسخة من الفاتورة قبل التعديل (لسجل التعديلات)
+// ---- حالة ربط المخزون ----
+let stockFlags = {};        // خاصية مخزني/غير مخزني لكل صنف (مشتركة في Firebase)
+let stockReceipts = {};     // التوريدات المرسلة للمخزون وحالتها
+let stockFlagLog = [];      // سجل تغييرات الخاصية (للإدارة فقط)
+let invAuth = null, invRef = null, invReady = false, invReceiptsLoaded = false;
+let invPromptSync = '', invSyncing = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -1335,21 +1375,22 @@ function renderItemCatalog(){
     return;
   }
   el.innerHTML = `<table><thead><tr>
-      <th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>آخر سعر</th><th>متوسط السعر</th><th>إجمالي الكمية</th><th>إجمالي القيمة</th>
+      <th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>مخزني</th><th>آخر سعر</th><th>متوسط السعر</th><th>إجمالي الكمية</th><th>إجمالي القيمة</th>
     </tr></thead><tbody>
-    ${dir.map(e=>{
+    ${(window._catDir = dir, dir).map((e,ci)=>{
       const st = itemStats(e.name);
       return `<tr>
         <td>${escapeHtml(e.name)}</td>
         <td>${e.category ? escapeHtml(e.category) : '<span style="color:var(--muted);">بدون تصنيف</span>'}</td>
         <td>${escapeHtml(e.unit)}</td>
+        <td>${catalogStockSelect(e, ci)}</td>
         <td class="num">${st ? st.lastPrice.toFixed(2) : '—'}</td>
         <td class="num">${st ? st.avgPrice.toFixed(2) : '—'}</td>
         <td class="num">${st ? st.totalQty : '—'}</td>
         <td class="num">${st ? st.totalValue.toFixed(2) : '—'}</td>
       </tr>`;
     }).join('')}
-  </tbody></table>`;
+  </tbody></table>` + flagLogHtml();
 }
 
 
@@ -1425,8 +1466,10 @@ $('btnAddItem').addEventListener('click', ()=>{
 // ---- جدول أصناف الفاتورة (قابل للتعديل مباشرة) ----
 function renderItemsTable(){
   const body = $('itemsBody');
+  fillStockDefaults();
+  const lockRids = editingId ? lineRids(editingId, currentItems) : [];
   if(currentItems.length===0){
-    body.innerHTML = '<tr class="empty-row"><td colspan="7">لم تتم إضافة أي صنف بعد</td></tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="8">لم تتم إضافة أي صنف بعد</td></tr>';
   } else {
     const cats = allCategories(), units = allUnits();
     body.innerHTML = currentItems.map((it,i)=>`
@@ -1436,13 +1479,14 @@ function renderItemsTable(){
           ${cats.map(c=>`<option value="${escapeHtml(c)}"${itemKey(c)===itemKey(it.category||'')?' selected':''}>${escapeHtml(c)}</option>`).join('')}
           ${it.category && !cats.some(c=>itemKey(c)===itemKey(it.category)) ? `<option value="${escapeHtml(it.category)}" selected>${escapeHtml(it.category)}</option>` : ''}
         </select></td>
-        <td><select class="cell" onchange="updateItemField(${i},'unit',this.value)">
+        <td><select class="cell" onchange="updateItemField(${i},'unit',this.value)" ${isLockedLine(lockRids[i])?'disabled title="الصنف مستلم في المخزون"':''}>
           ${units.map(u=>`<option value="${escapeHtml(u)}"${itemKey(u)===itemKey(it.unit||'')?' selected':''}>${escapeHtml(u)}</option>`).join('')}
         </select></td>
         <td><input class="cell" type="number" min="0" step="any" value="${it.qty}" oninput="updateItemField(${i},'qty',this.value)"></td>
         <td><input class="cell" type="number" min="0" step="0.01" value="${it.price}" oninput="updateItemField(${i},'price',this.value)"></td>
         <td class="num" id="rowTotal${i}">${r2(it.total).toFixed(2)}</td>
-        <td><button class="btn-ghost" onclick="removeItem(${i})">حذف</button></td>
+        <td>${stockCell(it, i, lockRids[i])}</td>
+        <td>${isLockedLine(lockRids[i]) ? '' : `<button class="btn-ghost" onclick="removeItem(${i})">حذف</button>`}</td>
       </tr>`).join('');
   }
   recalcInvoice();
@@ -1451,6 +1495,14 @@ function renderItemsTable(){
 // تعديل أي حقل في السطر يحدّث الإجمالي فورًا
 function updateItemField(i, field, value){
   if(!currentItems[i]) return;
+  if(field==='stock'){
+    const v = value==='yes' ? true : (value==='no' ? false : null);
+    currentItems[i].stock = v;
+    // أول مرة يتحدد فيها الصنف: تنحفظ الخاصية له بشكل دائم
+    if(v !== null && !flagFor(currentItems[i].name)) setStockFlag(currentItems[i].name, v);
+    renderItemsTable();
+    return;
+  }
   if(field==='qty' || field==='price'){
     currentItems[i][field] = num(value);
     currentItems[i].total = r2(num(currentItems[i].qty) * num(currentItems[i].price));
@@ -1614,6 +1666,7 @@ $('btnCancelEdit').addEventListener('click', ()=>{
 
 // فتح فاتورة محفوظة داخل النموذج للتعديل
 function editInvoice(id){
+  if(!isAdmin()){ toast('تعديل الفواتير من صلاحية الإدارة فقط'); return; }
   const inv = invoices.find(i=>i.id===id);
   if(!inv){ toast('لم يتم العثور على الفاتورة'); return; }
   if(inv.status === 'cancelled'){ toast('الفاتورة ملغاة — أعد تفعيلها أولًا قبل التعديل'); return; }
@@ -1635,11 +1688,13 @@ function editInvoice(id){
     const entered = it.priceEntered != null ? num(it.priceEntered) : num(it.price);
     return {
       name: it.name, category: it.category || '', unit: it.unit,
-      qty: num(it.qty), price: r2(entered), total: r2(num(it.qty)*entered)
+      qty: num(it.qty), price: r2(entered), total: r2(num(it.qty)*entered),
+      // الفواتير القديمة قبل الربط تُعتبر غير مخزنية حتى لا تنرسل للمخزون بأثر رجعي
+      stock: (it.stock === true || it.stock === false) ? it.stock : false
     };
   });
-  renderItemsTable();
   enterEditMode(inv);
+  renderItemsTable();
 
   document.querySelector('nav.tabs button[data-tab="new"]').click();
   window.scrollTo({top:0, behavior:'smooth'});
@@ -1664,6 +1719,7 @@ function validateInvoice(){
     if(!String(it.unit||'').trim()) return { ok:false, msg:`اختر وحدة للصنف: ${it.name}`, focus:null };
     if(num(it.qty) <= 0)  return { ok:false, msg:`الكمية غير صحيحة للصنف: ${it.name}`, focus:null };
     if(num(it.price) < 0) return { ok:false, msg:`سعر الشراء غير صحيح للصنف: ${it.name}`, focus:null };
+    if(it.stock !== true && it.stock !== false) return { ok:false, msg:`حدد هل «${it.name}» يدخل المخزون (عمود مخزني)`, focus:null };
   }
 
   if(f.discValue < 0) return { ok:false, msg:'قيمة الخصم لا يمكن أن تكون سالبة', focus:'discValue' };
@@ -1710,6 +1766,7 @@ function diffInvoices(oldInv, newInv){
     if(r2(o.qty)   !== r2(n.qty))   changes.push({ field:`الكمية — ${o.name}`, from:String(r2(o.qty)), to:String(r2(n.qty)) });
     if(r2(o.price) !== r2(n.price)) changes.push({ field:`سعر الشراء — ${o.name}`, from:r2(o.price).toFixed(2), to:r2(n.price).toFixed(2) });
     if(o.unit !== n.unit)           changes.push({ field:`الوحدة — ${o.name}`, from:o.unit, to:n.unit });
+    if(!!o.stock !== !!n.stock)     changes.push({ field:`مخزني — ${o.name}`, from:o.stock?'نعم':'لا', to:n.stock?'نعم':'لا' });
   });
   Object.keys(newMap).forEach(k=>{
     if(!oldMap[k]) changes.push({ field:'إضافة صنف', from:'—', to: newMap[k].name });
@@ -1733,7 +1790,8 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
 
   const rawItemsForSave = currentItems.map(it=>({
     name: it.name.trim(), category: it.category || '', unit: it.unit,
-    qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price))
+    qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price)),
+    stock: it.stock === true ? true : (it.stock === false ? false : null)
   }));
   const itemsForSave = netUnitPriceItems(rawItemsForSave, t.discountAmount, t.vatAmount, t.subtotal);
 
@@ -1890,7 +1948,8 @@ function rowToInvoice(r){
     qty: num(it.qty),
     price: num(it.price),
     total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
-    priceEntered: it.priceEntered != null ? num(it.priceEntered) : null
+    priceEntered: it.priceEntered != null ? num(it.priceEntered) : null,
+    stock: it.stock === true ? true : (it.stock === false ? false : null)
   }));
   const computedSub = r2(items.reduce((s,it)=>s+it.total,0));
   const subtotal = r.subtotal != null ? r2(num(r.subtotal)) : computedSub;
@@ -1933,7 +1992,8 @@ function invoiceToRow(inv){
     name: it.name || '', category: it.category || '', unit: it.unit || '',
     qty: r2(num(it.qty)), price: r2(num(it.price)),
     total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
-    priceEntered: it.priceEntered != null ? r2(num(it.priceEntered)) : r2(num(it.price))
+    priceEntered: it.priceEntered != null ? r2(num(it.priceEntered)) : r2(num(it.price)),
+    stock: it.stock === true ? true : (it.stock === false ? false : null)
   }));
   const subtotal = inv.subtotal != null ? r2(num(inv.subtotal)) : r2(items.reduce((s,it)=>s+it.total,0));
   const discountAmount = r2(num(inv.discountAmount));
@@ -2071,6 +2131,7 @@ async function doLogin(){
     applySession(data.session);
     $('loginPass').value = '';
     await startApp();
+    linkInventory(pass);
   }catch(err){
     console.error('login error', err);
     msg.textContent = (err && err.message && /Invalid/i.test(err.message))
@@ -2088,6 +2149,8 @@ $('loginEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') $('loginPas
 $('btnLogout').addEventListener('click', async ()=>{
   if(!confirm('تسجيل الخروج من هذا الجهاز؟')) return;
   try{ if(sb) await sb.auth.signOut(); }catch(err){}
+  stopInvSync();
+  try{ if(invAuth) await invAuth.signOut(); }catch(err){}
   if(pollTimer) clearInterval(pollTimer);
   invoices = [];
   try{ localStorage.removeItem(STORE_KEY); }catch(err){}
@@ -2124,6 +2187,7 @@ async function pullInvoices(silent){
     const pend = pendingCount();
     setSyncStatus(pend ? 'busy' : 'ok',
       `متصل — ${invoices.length} فاتورة` + (pend ? ` (${pend} بانتظار الرفع)` : ''));
+    syncReceipts();
     return true;
   }catch(err){
     console.error('pull error', err);
@@ -2592,6 +2656,8 @@ function renderLog(){
     const cancelled = inv.status === 'cancelled';
     const edited = (inv.editLog||[]).length > 0;
     const due = r2(inv.total - (inv.paidAmount||0));
+    const rids = lineRids(inv.id, inv.items);
+    const pendStock = cancelled ? 0 : rids.filter(r=> r && (!stockReceipts[r] || stockReceipts[r].status==='pending')).length;
     return `
     <details class="log-item${cancelled ? ' row-cancelled' : ''}">
       <summary>
@@ -2601,6 +2667,7 @@ function renderLog(){
           ${cancelled ? '<span class="badge badge-cancel">ملغاة</span>' : ''}
           ${!cancelled && due > 0 ? `<span class="badge badge-due">آجل ${due.toFixed(2)}</span>` : ''}
           ${edited ? `<span class="badge badge-edit">مُعدَّلة ${inv.editLog.length}×</span>` : ''}
+          ${pendStock ? `<span class="badge badge-stock">توريد معلّق ${pendStock}</span>` : ''}
         </span>
         <span class="ldate">${formatDate(inv.date)}</span>
         <span class="lamount">${money(inv.total)}</span>
@@ -2613,9 +2680,9 @@ function renderLog(){
         </div>
         ${inv.notes ? `<div style="font-size:12.5px;margin-bottom:10px;"><b>ملاحظات:</b> ${escapeHtml(inv.notes)}</div>` : ''}
         <table>
-          <thead><tr><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>إجمالي الصنف</th></tr></thead>
+          <thead><tr><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>إجمالي الصنف</th><th>المخزون</th></tr></thead>
           <tbody>
-            ${inv.items.map(it=>`<tr><td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.category||'—')}</td><td>${escapeHtml(it.unit)}</td><td class="num">${r2(it.qty)}</td><td class="num">${r2(it.price).toFixed(2)}</td><td class="num">${r2(it.total).toFixed(2)}</td></tr>`).join('')}
+            ${inv.items.map((it,ix)=>`<tr><td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.category||'—')}</td><td>${escapeHtml(it.unit)}</td><td class="num">${r2(it.qty)}</td><td class="num">${r2(it.price).toFixed(2)}</td><td class="num">${r2(it.total).toFixed(2)}</td><td>${stockStatusBadge(it, rids[ix], cancelled)}</td></tr>`).join('')}
           </tbody>
         </table>
         <div class="sum-block" style="margin-top:12px;border:1px solid var(--line);border-radius:5px;">
@@ -2628,13 +2695,13 @@ function renderLog(){
           <div class="sum-row"><span>المتبقي على المورد</span><b style="color:${r2(inv.total-(inv.paidAmount||0))>0?'var(--clay)':'var(--forest)'};">${money(r2(inv.total-(inv.paidAmount||0)))}</b></div>
         </div>
         ${renderEditLog(inv)}
-        <div class="mini-actions" style="margin-top:12px;">
+        ${isAdmin() ? `<div class="mini-actions" style="margin-top:12px;">
           ${cancelled
             ? `<button onclick="setInvoiceStatus('${inv.id}','active')">إعادة تفعيل</button>`
             : `<button onclick="editInvoice('${inv.id}')">تعديل</button>
                <button onclick="setInvoiceStatus('${inv.id}','cancelled')">إلغاء الفاتورة</button>`}
           <button class="danger" onclick="deleteInvoice(event,'${inv.id}')">حذف نهائي</button>
-        </div>
+        </div>` : ''}
       </div>
     </details>`;
   }).join('');
@@ -2660,6 +2727,7 @@ $('logBranchFilter').addEventListener('change', renderLog);
 
 // ---- إلغاء / إعادة تفعيل الفاتورة (لا تُحذف من النظام) ----
 async function setInvoiceStatus(id, status){
+  if(!isAdmin()){ toast('تعديل الفواتير من صلاحية الإدارة فقط'); return; }
   const inv = invoices.find(i=>i.id===id);
   if(!inv) return;
   if(!sb){ toast('غير متصل بقاعدة البيانات'); return; }
@@ -2691,11 +2759,13 @@ async function setInvoiceStatus(id, status){
 
 async function deleteInvoice(e, id){
   e.preventDefault();
+  if(!isAdmin()){ toast('حذف الفواتير من صلاحية الإدارة فقط'); return; }
   if(!sb){ toast('غير متصل بقاعدة البيانات'); return; }
   if(!confirm('حذف هذه الفاتورة نهائيًا من القاعدة المشتركة؟ سيختفي عند جميع الموظفين.')) return;
   try{
     const { error } = await sb.from(TABLE).delete().eq('id', id);
     if(error) throw error;
+    await cancelReceiptsForInvoice(id);
     await pullInvoices(true);
     renderLog();
   }catch(err){
@@ -3269,6 +3339,367 @@ renderItemsTable();
   $('dailyDate').value = t;
   $('monthlyMonth').value = t.slice(0,7);
 })();
+// ============================================================
+//  ربط المخزون: توريد مخزني ← نظام المخزون (Firebase r123466e)
+//  الفاتورة تنحفظ في Supabase كالعادة، والأصناف المخزنية تنرسل
+//  كـ "توريدات معلّقة" لقاعدة المخزون، ومسؤول المخزون يأكدها هناك.
+// ============================================================
+const INV_FB_CONFIG = {
+  apiKey: "AIzaSyBWqYAsKVx0wOJTAahhQdLj20x9y37hHX0",
+  authDomain: "r123466e.firebaseapp.com",
+  databaseURL: "https://r123466e-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "r123466e"
+};
+const INV_KEY = 'inventory-simple-v1';
+// أسماء الفروع في المشتريات ← أسماؤها في نظام المخزون
+const INV_BRANCH_MAP = { 'الرئيسي':'الفرع الرئيسي', 'الرياض':'فرع الرياض' };
+
+try{
+  const invApp = firebase.initializeApp(INV_FB_CONFIG, 'inventory');
+  invAuth = invApp.auth();
+  invRef = invApp.database().ref(INV_KEY);
+}catch(err){ console.error('inventory link init', err); invAuth = null; invRef = null; }
+
+function isAdmin(){ return currentUserBranch === 'all'; }
+
+// بصمة ثابتة لنص (تُستخدم كمفتاح آمن في Firebase بدل الأسماء العربية)
+function hashStr(s){
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for(let i=0;i<s.length;i++){
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1>>>16), 2246822507) ^ Math.imul(h2 ^ (h2>>>13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2>>>16), 2246822507) ^ Math.imul(h1 ^ (h1>>>13), 3266489909);
+  return (h2>>>0).toString(36) + (h1>>>0).toString(36);
+}
+const safeKey = s => String(s||'').replace(/[.#$\[\]\/]/g,'_');
+const flagKey = name => 'f' + hashStr(itemKey(name));
+function flagFor(name){ return (stockFlags && stockFlags[flagKey(name)]) || null; }
+
+// معرّف التوريد لكل سطر مخزني بالفاتورة (ثابت، فما يتكرر التوريد لو انحفظت الفاتورة أكثر من مرة)
+function lineRids(invId, items){
+  const occ = {};
+  return (items||[]).map(it=>{
+    if(it.stock !== true) return null;
+    const base = itemKey(it.name) + '|' + itemKey(it.unit);
+    occ[base] = (occ[base]||0) + 1;
+    return safeKey(invId) + '_' + hashStr(base + '|' + occ[base]);
+  });
+}
+function isLockedLine(rid){
+  const r = rid && stockReceipts[rid];
+  return !!(r && r.status === 'confirmed');
+}
+
+// ---- واجهة: حالة الربط في الشريط العلوي ----
+function setInvState(state, msg){
+  const b = $('invState'); if(!b) return;
+  b.textContent = msg;
+  b.classList.toggle('off', state === 'off');
+}
+$('invState').addEventListener('click', ()=>{
+  if(invReady || !currentUserEmail) return;
+  openInvPrompt('');
+});
+
+// ---- تسجيل الدخول لقاعدة المخزون بنفس حساب المشتريات ----
+function waitInvAuth(){
+  return new Promise(res=>{
+    if(!invAuth) return res(null);
+    const un = invAuth.onAuthStateChanged(u=>{ un(); res(u); });
+  });
+}
+async function invSignIn(email, pass){
+  try{ await invAuth.signInWithEmailAndPassword(email, pass); return 'ok'; }
+  catch(e){
+    const code = (e && e.code) || '';
+    if(code === 'auth/network-request-failed') return 'تحقق من الإنترنت';
+    if(code === 'auth/too-many-requests') return 'محاولات كثيرة — جرّب بعد دقائق';
+    // ما عنده حساب مخزون؟ ننشئه له بنفس بيانات المشتريات
+    try{ await invAuth.createUserWithEmailAndPassword(email, pass); return 'ok'; }
+    catch(e2){
+      if(e2 && e2.code === 'auth/email-already-in-use') return 'exists';
+      return (e2 && e2.code) || 'خطأ غير معروف';
+    }
+  }
+}
+async function linkInventory(pass){
+  if(!invAuth){ setInvState('off', 'تعذّر تحميل ربط المخزون'); return; }
+  const email = currentUserEmail;
+  if(!email) return;
+  const u = await waitInvAuth();
+  if(u && (u.email||'').toLowerCase() === email){ startInvSync(); return; }
+  if(u){ try{ await invAuth.signOut(); }catch(err){} }
+  if(!pass){ setInvState('off', 'المخزون غير مربوط'); openInvPrompt(''); return; }
+  setInvState('busy', 'جارٍ ربط المخزون…');
+  const r = await invSignIn(email, pass);
+  if(r === 'ok'){ startInvSync(); return; }
+  if(r === 'exists'){ setInvState('off', 'المخزون غير مربوط'); openInvPrompt(pass); return; }
+  setInvState('off', 'المخزون غير مربوط');
+  toast('تعذّر ربط المخزون: ' + r);
+}
+function openInvPrompt(syncPass){
+  invPromptSync = syncPass || '';
+  $('invLinkMsg').textContent = invPromptSync
+    ? 'كلمة مرورك في نظام المخزون تختلف عن المشتريات. أدخل كلمة مرور المخزون مرة وحدة، وبعدها تتوحّد الكلمتين.'
+    : 'أدخل كلمة مرورك عشان الأصناف المخزنية تنرسل لنظام المخزون.';
+  $('invLinkPass').value = ''; $('invLinkErr').textContent = '';
+  $('invLinkModal').style.display = 'flex';
+  setTimeout(()=>$('invLinkPass').focus(), 50);
+}
+function closeInvPrompt(){ $('invLinkModal').style.display = 'none'; $('invLinkPass').value = ''; }
+$('btnInvLater').addEventListener('click', ()=>{
+  closeInvPrompt();
+  setInvState('off', 'المخزون غير مربوط — اضغط للربط');
+  toast('الأصناف المخزنية بتنتظر لين تربط المخزون');
+});
+$('invLinkPass').addEventListener('keydown', e=>{ if(e.key==='Enter') $('btnInvLink').click(); });
+$('btnInvLink').addEventListener('click', async ()=>{
+  const p = $('invLinkPass').value;
+  const err = $('invLinkErr');
+  if(!p){ err.textContent = 'أدخل كلمة المرور'; return; }
+  const btn = $('btnInvLink'); btn.disabled = true; err.textContent = '';
+  try{
+    if(invPromptSync){
+      try{
+        await invAuth.signInWithEmailAndPassword(currentUserEmail, p);
+      }catch(e){ err.textContent = 'كلمة مرور المخزون غير صحيحة'; return; }
+      try{ await invAuth.currentUser.updatePassword(invPromptSync); }catch(e){ console.warn('password sync', e); }
+      closeInvPrompt(); startInvSync(); toast('تم ربط المخزون وتوحيد كلمة المرور');
+    }else{
+      const r = await invSignIn(currentUserEmail, p);
+      if(r === 'ok'){ closeInvPrompt(); startInvSync(); toast('تم ربط المخزون'); }
+      else if(r === 'exists') err.textContent = 'هذي ما تطابق حسابك في المخزون — أدخل كلمة مرور نظام المخزون';
+      else err.textContent = 'تعذّر الربط: ' + r;
+    }
+  }finally{ btn.disabled = false; }
+});
+
+// ---- الاشتراك في بيانات المخزون ----
+function startInvSync(){
+  if(invReady || !invRef) return;
+  invReady = true;
+  setInvState('ok', 'المخزون مربوط ✓');
+  const onErr = e=>{ console.error('inventory sync', e); setInvState('off', 'تعذّر الاتصال بالمخزون'); };
+  invRef.child('stockFlags').on('value', s=>{
+    stockFlags = s.val() || {};
+    applyFlagsToCurrent();
+    refreshStockUI();
+  }, onErr);
+  invRef.child('receipts').on('value', s=>{
+    stockReceipts = s.val() || {};
+    invReceiptsLoaded = true;
+    syncReceipts();
+    refreshStockUI();
+    if(editingId) renderItemsTable();
+  }, onErr);
+  if(isAdmin()){
+    invRef.child('flagLog').limitToLast(150).on('value', s=>{
+      stockFlagLog = Object.values(s.val() || {}).sort((a,b)=> (b.at||0) - (a.at||0));
+      refreshStockUI();
+    }, ()=>{});
+  }
+}
+function stopInvSync(){
+  if(invRef){
+    try{ invRef.child('stockFlags').off(); invRef.child('receipts').off(); invRef.child('flagLog').off(); }catch(err){}
+  }
+  invReady = false; invReceiptsLoaded = false;
+  stockFlags = {}; stockReceipts = {}; stockFlagLog = [];
+  setInvState('busy', 'المخزون…');
+}
+function refreshStockUI(){
+  const active = document.querySelector('nav.tabs button.active');
+  const tab = active ? active.dataset.tab : 'new';
+  if(tab === 'log') renderLog();
+  if(tab === 'settings') renderItemCatalog();
+}
+
+// ---- خاصية مخزني / غير مخزني ----
+function fillStockDefaults(){
+  currentItems.forEach(it=>{
+    if(it.stock === undefined){
+      const f = flagFor(it.name);
+      it.stock = f ? !!f.stock : null;
+    }
+  });
+}
+function applyFlagsToCurrent(){
+  let changed = false;
+  currentItems.forEach(it=>{
+    if(it.stock === null || it.stock === undefined){
+      const f = flagFor(it.name);
+      if(f){ it.stock = !!f.stock; changed = true; }
+    }
+  });
+  if(changed) renderItemsTable();
+}
+async function setStockFlag(name, val){
+  const k = flagKey(name);
+  const prev = stockFlags[k];
+  if(prev && !!prev.stock === !!val) return;
+  const now = Date.now();
+  const by = userName || currentUserEmail || '';
+  const doc = { name: String(name).trim(), stock: !!val, by, byEmail: currentUserEmail || '', at: now };
+  stockFlags[k] = doc;
+  if(!invRef || !invReady){ return; }
+  const upd = {};
+  upd['stockFlags/' + k] = doc;
+  upd['flagLog/' + now.toString(36) + Math.random().toString(36).slice(2,6)] = {
+    name: doc.name,
+    from: prev ? (prev.stock ? 'مخزني' : 'غير مخزني') : 'غير محدد',
+    to: val ? 'مخزني' : 'غير مخزني',
+    by, byEmail: currentUserEmail || '', at: now
+  };
+  try{ await invRef.update(upd); }
+  catch(err){ console.error('flag save', err); toast('تعذّر حفظ خاصية المخزني — تحقق من الاتصال'); }
+}
+function stockCell(it, i, rid){
+  if(isLockedLine(rid)) return '<span class="stk ok" title="استلمه المخزون — ما يتغيّر">✓ مستلم</span>';
+  const f = flagFor(it.name);
+  const override = f && (it.stock === true || it.stock === false) && !!f.stock !== it.stock;
+  return `<select class="cell${it.stock === null ? ' need' : ''}" onchange="updateItemField(${i},'stock',this.value)">
+      ${it.stock === null ? '<option value="" selected>حدد…</option>' : ''}
+      <option value="yes"${it.stock === true ? ' selected' : ''}>نعم</option>
+      <option value="no"${it.stock === false ? ' selected' : ''}>لا</option>
+    </select>${override ? '<span class="stk-note">لهذي الفاتورة فقط</span>' : ''}`;
+}
+function catalogStockSelect(e, ci){
+  const f = flagFor(e.name);
+  const v = f ? (f.stock ? 'yes' : 'no') : '';
+  return `<select class="cell${v ? '' : ' need'}" style="min-width:95px" onchange="onCatalogStock(${ci}, this.value)" ${invReady ? '' : 'disabled title="اربط المخزون أولًا"'}>
+      ${v ? '' : '<option value="" selected>غير محدد</option>'}
+      <option value="yes"${v==='yes'?' selected':''}>مخزني</option>
+      <option value="no"${v==='no'?' selected':''}>غير مخزني</option>
+    </select>`;
+}
+async function onCatalogStock(ci, value){
+  const e = (window._catDir || [])[ci];
+  if(!e || !value) return;
+  await setStockFlag(e.name, value === 'yes');
+  toast(`«${e.name}» صار ${value === 'yes' ? 'مخزني' : 'غير مخزني'} — يطبّق على الفواتير الجديدة`);
+  renderItemCatalog();
+}
+function flagLogHtml(){
+  if(!isAdmin() || !stockFlagLog.length) return '';
+  const rows = stockFlagLog.slice(0, 100).map(l=>{
+    const when = l.at ? new Date(l.at).toLocaleString('ar-SA-u-nu-latn') : '';
+    return `<tr><td>${escapeHtml(when)}</td><td>${escapeHtml(l.name)}</td><td>${escapeHtml(l.from)} ← <b>${escapeHtml(l.to)}</b></td><td>${escapeHtml(l.by || l.byEmail || '')}</td></tr>`;
+  }).join('');
+  return `<div style="padding:14px 16px 6px;border-top:1px solid var(--line);"><b style="color:var(--forest);">سجل تغييرات خاصية المخزني</b>
+    <span style="font-size:12px;color:var(--muted);"> — يظهر للإدارة فقط</span></div>
+    <table class="flaglog"><thead><tr><th>الوقت</th><th>الصنف</th><th>التغيير</th><th>بواسطة</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ---- حالة التوريد في السجل ----
+function stockStatusBadge(it, rid, invCancelled){
+  if(it.stock === false) return '<span class="stk no">غير مخزني</span>';
+  if(it.stock !== true) return '<span style="color:var(--muted);">—</span>';
+  const r = rid && stockReceipts[rid];
+  if(!r){
+    if(invCancelled) return '<span class="stk no">ملغى</span>';
+    return invReady ? '<span class="stk wait">جارٍ الإرسال…</span>' : '<span class="stk wait">بانتظار ربط المخزون</span>';
+  }
+  const who = r.confirmedBy || r.rejectedBy || '';
+  const when = (r.confirmedAt || r.rejectedAt) ? new Date(r.confirmedAt || r.rejectedAt).toLocaleString('ar-SA-u-nu-latn') : '';
+  const warn = (isAdmin() && r.invoiceChanged) ? `<span class="stk-note" style="color:var(--clay);">⚠ ${escapeHtml(r.invoiceChanged)}</span>` : '';
+  if(r.status === 'pending') return '<span class="stk wait">⏳ بانتظار الاستلام</span>';
+  if(r.status === 'confirmed'){
+    const diff = r.receivedQty != null && r2(num(r.receivedQty)) !== r2(num(r.qty));
+    return `<span class="stk ok" title="${escapeHtml(who + ' — ' + when)}">✓ استُلم${diff ? ' ' + r2(num(r.receivedQty)) : ''}</span>`
+      + (r.note ? `<span class="stk-note">${escapeHtml(r.note)}</span>` : '') + warn;
+  }
+  if(r.status === 'rejected') return `<span class="stk bad" title="${escapeHtml(who + ' — ' + when)}">✗ مرفوض</span>`
+      + (r.note ? `<span class="stk-note">${escapeHtml(r.note)}</span>` : '');
+  if(r.status === 'cancelled') return '<span class="stk no">ملغى</span>';
+  return '—';
+}
+
+// ---- مزامنة التوريدات: كل سطر مخزني بفاتورة فعّالة = توريد معلّق ----
+async function syncReceipts(){
+  if(!invReady || !invReceiptsLoaded || !invRef || invSyncing) return;
+  invSyncing = true;
+  try{
+    const upd = {};           // عمليات على توريدات معلّقة/جديدة (مسموحة للموظفين)
+    const adminUpd = {};      // تنبيهات على توريدات مستلمة (الإدارة فقط)
+    const desired = {};
+    const visibleIds = new Set(invoices.map(i=>i.id));
+    invoices.forEach(inv=>{
+      if(inv.status === 'cancelled') return;
+      const rids = lineRids(inv.id, inv.items);
+      inv.items.forEach((it, ix)=>{ if(rids[ix]) desired[rids[ix]] = { inv, it }; });
+    });
+    Object.keys(desired).forEach(rid=>{
+      const { inv, it } = desired[rid];
+      const ex = stockReceipts[rid];
+      const fields = {
+        invoiceNo: inv.number || '', supplier: inv.supplier || '', invoiceDate: inv.date || '',
+        name: it.name, unit: it.unit || '', category: it.category || '', qty: r2(num(it.qty))
+      };
+      if(!ex){
+        upd['receipts/' + rid] = Object.assign({
+          id: rid, invoiceId: inv.id,
+          branch: INV_BRANCH_MAP[inv.branch || DEFAULT_BRANCH] || (inv.branch || DEFAULT_BRANCH),
+          purchaseBranch: inv.branch || DEFAULT_BRANCH,
+          status: 'pending',
+          createdBy: inv.createdBy || userName || '', createdByEmail: currentUserEmail || '',
+          createdAt: Date.now()
+        }, fields);
+      }else if(ex.status === 'cancelled'){
+        // فاتورة انلغت ثم رجعت فعّالة: التوريد يرجع معلّق
+        Object.keys(fields).forEach(k=>{ upd['receipts/' + rid + '/' + k] = fields[k]; });
+        upd['receipts/' + rid + '/status'] = 'pending';
+        upd['receipts/' + rid + '/cancelledAt'] = null;
+        upd['receipts/' + rid + '/cancelReason'] = null;
+      }else if(ex.status === 'pending'){
+        Object.keys(fields).forEach(k=>{
+          if(String(ex[k] == null ? '' : ex[k]) !== String(fields[k])) upd['receipts/' + rid + '/' + k] = fields[k];
+        });
+      }else if(ex.status === 'confirmed' && isAdmin()){
+        const msg = r2(num(ex.qty)) !== fields.qty
+          ? `الكمية بالفاتورة تغيّرت من ${r2(num(ex.qty))} إلى ${fields.qty} بعد الاستلام — راجع رصيد المخزون` : '';
+        if((ex.invoiceChanged || '') !== msg) adminUpd['receipts/' + rid + '/invoiceChanged'] = msg || null;
+      }
+    });
+    // أسطر انشالت من الفاتورة أو فاتورة انلغت
+    Object.values(stockReceipts).forEach(r=>{
+      if(!r || !r.id || desired[r.id] || !visibleIds.has(r.invoiceId)) return;
+      if(r.status === 'pending'){
+        upd['receipts/' + r.id + '/status'] = 'cancelled';
+        upd['receipts/' + r.id + '/cancelledAt'] = Date.now();
+        upd['receipts/' + r.id + '/cancelReason'] = 'انشال الصنف من الفاتورة أو انلغت الفاتورة';
+      }else if(r.status === 'confirmed' && isAdmin()){
+        const msg = 'الصنف انشال من الفاتورة أو الفاتورة انلغت بعد الاستلام — راجع رصيد المخزون';
+        if(r.invoiceChanged !== msg) adminUpd['receipts/' + r.id + '/invoiceChanged'] = msg;
+      }
+    });
+    if(Object.keys(upd).length){
+      try{ await invRef.update(upd); }catch(err){ console.error('receipts sync', err); setInvState('off', 'تعذّر إرسال التوريدات'); }
+    }
+    if(Object.keys(adminUpd).length){
+      try{ await invRef.update(adminUpd); }catch(err){ console.warn('receipts admin flags', err); }
+    }
+  }finally{ invSyncing = false; }
+}
+async function cancelReceiptsForInvoice(invId){
+  if(!invReady || !invRef) return;
+  const upd = {};
+  Object.values(stockReceipts).forEach(r=>{
+    if(!r || r.invoiceId !== invId) return;
+    if(r.status === 'pending'){
+      upd['receipts/' + r.id + '/status'] = 'cancelled';
+      upd['receipts/' + r.id + '/cancelledAt'] = Date.now();
+      upd['receipts/' + r.id + '/cancelReason'] = 'انحذفت الفاتورة';
+    }else if(r.status === 'confirmed'){
+      upd['receipts/' + r.id + '/invoiceChanged'] = 'الفاتورة انحذفت بعد الاستلام — راجع رصيد المخزون';
+    }
+  });
+  if(Object.keys(upd).length){
+    try{ await invRef.update(upd); }catch(err){ console.error('cancel receipts', err); }
+  }
+}
+
 (async ()=>{
   if(!createClientOnly()){
     $('loginMsg').textContent = 'إعدادات الاتصال ناقصة في هذا الملف';
@@ -3279,6 +3710,7 @@ renderItemsTable();
     if(data && data.session && applySession(data.session)){
       loadCache();
       await startApp();
+      linkInventory(null);
     }
   }catch(err){ console.error('session check', err); }
 })();
