@@ -3498,8 +3498,9 @@ function startInvSync(){
   }, onErr);
   invRef.child('receipts').on('value', s=>{
     stockReceipts = s.val() || {};
-    invReceiptsLoaded = true;
-    syncReceipts();
+    // المزامنة تصير بعد كل تحديث للفواتير من القاعدة، مو مع كل تغيير بالتوريدات
+    // (عشان جهاز فواتيره قديمة ما يرد على تغييرات جهاز ثاني)
+    if(!invReceiptsLoaded){ invReceiptsLoaded = true; syncReceipts(); }
     refreshStockUI();
     if(editingId) renderItemsTable();
   }, onErr);
@@ -3633,9 +3634,18 @@ async function syncReceipts(){
     const upd = {};           // عمليات على توريدات معلّقة/جديدة (مسموحة للموظفين)
     const adminUpd = {};      // تنبيهات على توريدات مستلمة (الإدارة فقط)
     const desired = {};
-    const visibleIds = new Set(invoices.map(i=>i.id));
+    // نسخة الفاتورة = عدد تعديلاتها. الجهاز اللي عنده نسخة أقدم من المسجّلة بالتوريد
+    // ما يلمس توريدات هالفاتورة أبدًا (يمنع جهازين يعكسون شغل بعض).
+    const ver = inv => (inv && Array.isArray(inv.editLog)) ? inv.editLog.length : 0;
+    const maxVer = {};
+    Object.values(stockReceipts).forEach(r=>{
+      if(r && r.invoiceId) maxVer[r.invoiceId] = Math.max(maxVer[r.invoiceId] || 0, num(r.invVer));
+    });
+    const byId = {};
+    invoices.forEach(inv=>{ byId[inv.id] = inv; });
+    const isStale = id => byId[id] && ver(byId[id]) < (maxVer[id] || 0);
     invoices.forEach(inv=>{
-      if(inv.status === 'cancelled') return;
+      if(inv.status === 'cancelled' || isStale(inv.id)) return;
       const rids = lineRids(inv.id, inv.items);
       inv.items.forEach((it, ix)=>{ if(rids[ix]) desired[rids[ix]] = { inv, it }; });
     });
@@ -3644,7 +3654,8 @@ async function syncReceipts(){
       const ex = stockReceipts[rid];
       const fields = {
         invoiceNo: inv.number || '', supplier: inv.supplier || '', invoiceDate: inv.date || '',
-        name: it.name, unit: it.unit || '', category: it.category || '', qty: r2(num(it.qty))
+        name: it.name, unit: it.unit || '', category: it.category || '', qty: r2(num(it.qty)),
+        invVer: ver(inv)
       };
       if(!ex){
         upd['receipts/' + rid] = Object.assign({
@@ -3669,17 +3680,17 @@ async function syncReceipts(){
         const msg = r2(num(ex.qty)) !== fields.qty
           ? `الكمية بالفاتورة تغيّرت من ${r2(num(ex.qty))} إلى ${fields.qty} بعد الاستلام — راجع رصيد المخزون` : '';
         if((ex.invoiceChanged || '') !== msg) adminUpd['receipts/' + rid + '/invoiceChanged'] = msg || null;
+        if(num(ex.invVer) !== fields.invVer) adminUpd['receipts/' + rid + '/invVer'] = fields.invVer;
       }
     });
-    // أسطر انشالت من الفاتورة أو فاتورة انلغت
+    // أسطر انشالت أو تغيّر اسمها بالفاتورة، أو فاتورة انلغت
     Object.values(stockReceipts).forEach(r=>{
-      if(!r || !r.id || desired[r.id] || !visibleIds.has(r.invoiceId)) return;
-      if(r.status === 'pending'){
-        upd['receipts/' + r.id + '/status'] = 'cancelled';
-        upd['receipts/' + r.id + '/cancelledAt'] = Date.now();
-        upd['receipts/' + r.id + '/cancelReason'] = 'انشال الصنف من الفاتورة أو انلغت الفاتورة';
+      if(!r || !r.id || desired[r.id] || !byId[r.invoiceId] || isStale(r.invoiceId)) return;
+      if(r.status === 'pending' || r.status === 'cancelled'){
+        // التوريد المعلّق ينحذف تمامًا (ما ينترك "ملغى" يلخبط السجل)
+        upd['receipts/' + r.id] = null;
       }else if(r.status === 'confirmed' && isAdmin()){
-        const msg = 'الصنف انشال من الفاتورة أو الفاتورة انلغت بعد الاستلام — راجع رصيد المخزون';
+        const msg = 'الصنف انشال أو تغيّر اسمه بالفاتورة بعد الاستلام — راجع رصيد المخزون';
         if(r.invoiceChanged !== msg) adminUpd['receipts/' + r.id + '/invoiceChanged'] = msg;
       }
     });
