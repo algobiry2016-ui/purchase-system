@@ -178,6 +178,24 @@
   .rep-total{display:flex;justify-content:space-between;padding:13px 18px;background:#F7F8F4;border-top:1px solid var(--line);font-size:14px;}
   .rep-total b{color:var(--forest);font-size:17px;font-feature-settings:"tnum" 1;}
   .mini-actions{display:flex;gap:6px;}
+  /* مقارنة الموردين */
+  .cmp-per{white-space:nowrap;}
+  .cmp-per.on{background:var(--forest);color:#fff;border-color:var(--forest);}
+  .cmp-note{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.8;white-space:normal;}
+  .cmp-sub{font-weight:400;font-size:12px;color:var(--muted);}
+  .cmp-grid td{text-align:center;}
+  .cmp-grid td:first-child,.cmp-grid td:nth-child(2){text-align:right;}
+  .cmp-avg{font-weight:700;font-variant-numeric:tabular-nums;}
+  .cmp-meta{font-size:11px;color:var(--muted);font-weight:400;}
+  .cmp-best{background:#E3EEDD;}
+  .cmp-best .cmp-avg{color:#2F5A22;}
+  .cmp-worst{background:#F6DFD8;}
+  .cmp-worst .cmp-avg{color:var(--clay);}
+  .cmp-na{color:#C9CCC2;}
+  .cmp-hot{color:var(--clay);font-weight:700;}
+  .cmp-batches summary{cursor:pointer;}
+  .cmp-batches div{font-size:12px;color:var(--muted);padding:2px 0;white-space:nowrap;}
+  .cmp-alias-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #EDEFE8;font-size:13px;flex-wrap:wrap;}
   /* ربط المخزون */
   .stk{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;}
   .stk.wait{background:#F2EDD4;color:#8A6D0B;}
@@ -690,6 +708,35 @@
         </div>
         <div class="card-body" id="topItems"></div>
       </div>
+      <div class="card" id="cmpCard">
+        <div class="card-head"><h2>مقارنة أسعار الموردين</h2><span class="hint">سعر الوحدة الصافي بعد الخصم والضريبة</span></div>
+        <div class="card-body">
+          <div class="grid4" style="align-items:end;margin-bottom:12px;">
+            <div class="field"><label>التصنيف</label><select id="cmpCategory"></select></div>
+            <div class="field"><label>من تاريخ</label><input type="date" id="cmpFrom"></div>
+            <div class="field"><label>إلى تاريخ</label><input type="date" id="cmpTo"></div>
+            <div class="field"><label>الفترة</label>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-outline cmp-per" data-m="1" style="flex:1;padding:9px 4px;font-size:12px;">شهر</button>
+                <button class="btn btn-outline cmp-per" data-m="3" style="flex:1;padding:9px 4px;font-size:12px;">٣ شهور</button>
+                <button class="btn btn-outline cmp-per" data-m="6" style="flex:1;padding:9px 4px;font-size:12px;">٦ شهور</button>
+                <button class="btn btn-outline cmp-per" data-m="0" style="flex:1;padding:9px 4px;font-size:12px;">الكل</button>
+              </div>
+            </div>
+          </div>
+          <label style="display:flex;gap:8px;align-items:center;font-weight:600;margin-bottom:10px;cursor:pointer;"><input type="checkbox" id="cmpShowAll" style="width:auto;"> عرض كل الأصناف (حتى اللي عند مورد واحد)</label>
+          <div id="cmpBody"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>أسعار المورد بين الدفعات</h2>
+          <select id="cmpSupplier" style="width:220px;padding:7px 9px;font-size:12.5px;"></select></div>
+        <div class="card-body" id="cmpSupBody"></div>
+      </div>
+      <div class="card" id="cmpAliasWrap" style="display:none;">
+        <details><summary class="card-head" style="cursor:pointer;list-style:none;"><h2>ربط أسماء أصناف متشابهة</h2><span class="hint">للإدارة فقط</span></summary>
+          <div class="card-body" id="cmpAliasBody"></div></details>
+      </div>
     </section>
 
     <!-- SETTINGS -->
@@ -1133,7 +1180,8 @@ function normalizeCatalog(c){
   };
   return {
     units: clean(c && c.units, DEFAULT_UNITS),
-    categories: clean(c && c.categories, DEFAULT_CATEGORIES)
+    categories: clean(c && c.categories, DEFAULT_CATEGORIES),
+    aliases: (c && c.aliases && typeof c.aliases === 'object' && !Array.isArray(c.aliases)) ? c.aliases : {}
   };
 }
 
@@ -3169,6 +3217,7 @@ function renderReports(){
   });
   renderBars('topSuppliers', bySupplier, v => v.toFixed(2) + ' ر.س', 6);
   renderTopItems();
+  renderCompare();
 }
 
 // ---- أكثر 10 أصناف شراءً داخل تصنيف مختار ----
@@ -3768,6 +3817,263 @@ async function cancelReceiptsForInvoice(invId){
     try{ await invRef.update(upd); }catch(err){ console.error('cancel receipts', err); }
   }
 }
+
+// ============================================================
+//  مقارنة أسعار الموردين
+//  السعر المعتمد = السعر الصافي للوحدة (بعد الخصم والضريبة) = المبلغ الفعلي ÷ الكمية
+//  المقارنة تصير بين نفس الصنف ونفس الوحدة فقط (ربطة ما تنقارن بحبة)
+// ============================================================
+function canonName(name){
+  const a = catalog.aliases && catalog.aliases[itemKey(name)];
+  return a || name;
+}
+const cmpPct = v => (isFinite(v) ? Math.round(v*100) : 0) + '%';
+const cmpMoney = v => r2(v).toFixed(2);
+function isoMonthsAgo(m){
+  const d = new Date(); d.setMonth(d.getMonth() - m);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function cmpLines(){
+  const lines = purchaseLines({
+    from: $('cmpFrom').value || '', to: $('cmpTo').value || '',
+    category: $('cmpCategory').value || '', supplier:'', item:'', unit:''
+  });
+  return lines.filter(l=> l.qty > 0 && l.total > 0).map(l=>{
+    const cn = canonName(l.name);
+    return Object.assign({}, l, {
+      cname: cn, ckey: itemKey(cn) + '|' + itemKey(l.unit),
+      unitNet: l.total / l.qty, supplier: String(l.supplier||'').trim() || '—'
+    });
+  });
+}
+function cmpAggregate(lines){
+  const items = {}, supSpend = {};
+  lines.forEach(l=>{
+    supSpend[l.supplier] = (supSpend[l.supplier]||0) + l.total;
+    const I = items[l.ckey] || (items[l.ckey] = { name:l.cname, unit:l.unit, sup:{}, qty:0, spend:0 });
+    I.qty += l.qty; I.spend += l.total;
+    const S = I.sup[l.supplier] || (I.sup[l.supplier] = { qty:0, total:0, n:0, batches:[] });
+    S.qty += l.qty; S.total += l.total; S.n++;
+    S.batches.push({ date:l.date, number:l.number, qty:l.qty, price:l.unitNet });
+  });
+  Object.values(items).forEach(I=>{
+    Object.values(I.sup).forEach(S=>{
+      S.avg = S.total / S.qty;
+      S.batches.sort((a,b)=> String(a.date).localeCompare(String(b.date)));
+      S.last = S.batches[S.batches.length-1].price;
+    });
+    const avgs = Object.values(I.sup).map(S=>S.avg);
+    I.min = Math.min(...avgs); I.max = Math.max(...avgs);
+    I.nSup = avgs.length;
+  });
+  const suppliers = Object.keys(supSpend).sort((a,b)=> supSpend[b]-supSpend[a]);
+  return { items, supSpend, suppliers };
+}
+
+function syncCmpCats(){
+  const sel = $('cmpCategory'); const cats = allCategories();
+  if(sel.options.length === cats.length + 1) return;
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">كل التصنيفات</option>` + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if(cats.includes(prev)) sel.value = prev;
+}
+function renderCompare(){
+  const box = $('cmpBody'); if(!box) return;
+  syncCmpCats();
+  const lines = cmpLines();
+  if(!lines.length){
+    box.innerHTML = `<div class="empty-state" style="padding:24px;"><div class="big">—</div>ما فيه مشتريات لهذا التصنيف في الفترة المحددة</div>`;
+    renderAliasTool(); return;
+  }
+  const { items, supSpend, suppliers } = cmpAggregate(lines);
+  const showAll = $('cmpShowAll').checked;
+  const multi = Object.values(items).filter(I=> I.nSup >= 2);
+  const rowsItems = (showAll ? Object.values(items) : multi).sort((a,b)=> b.spend - a.spend);
+
+  // ملخص الموردين: الأرخص في كم صنف، والأغلى في كم، ومتوسط الزيادة عن الأرخص (مرجّح بالمبلغ)
+  const sum = {};
+  suppliers.forEach(s=> sum[s] = { cheap:0, dear:0, items:0, extraAmt:0, cmpSpend:0 });
+  Object.values(items).forEach(I=>{
+    Object.entries(I.sup).forEach(([s,S])=>{
+      sum[s].items++;
+      if(I.nSup < 2) return;
+      if(S.avg <= I.min + 1e-9) sum[s].cheap++;
+      if(S.avg >= I.max - 1e-9) sum[s].dear++;
+      sum[s].extraAmt += (S.avg - I.min) * S.qty;
+      sum[s].cmpSpend += S.total;
+    });
+  });
+  const totalSaving = Object.values(sum).reduce((a,x)=> a + x.extraAmt, 0);
+
+  const supTable = `
+    <div style="font-weight:700;color:var(--forest);margin:4px 0 8px;">ملخص الموردين</div>
+    <table><thead><tr><th>المورد</th><th>إجمالي المشتريات</th><th>عدد الأصناف</th><th>الأرخص في</th><th>الأغلى في</th><th>متوسط زيادته عن الأرخص</th><th>دفعت زيادة</th></tr></thead><tbody>
+    ${suppliers.map(s=>{
+      const x = sum[s];
+      const over = x.cmpSpend > 0 ? x.extraAmt / (x.cmpSpend - x.extraAmt) : 0;
+      return `<tr><td><b>${escapeHtml(s)}</b></td><td class="num">${cmpMoney(supSpend[s])}</td><td class="num">${x.items}</td>
+        <td class="num" style="color:#2F5A22;font-weight:700;">${x.cheap}</td><td class="num" style="color:var(--clay);font-weight:700;">${x.dear}</td>
+        <td class="num">${x.cmpSpend > 0 ? cmpPct(over) : '—'}</td><td class="num">${x.extraAmt > 0.005 ? cmpMoney(x.extraAmt) : '—'}</td></tr>`;
+    }).join('')}
+    </tbody></table>
+    <div class="cmp-note">لو كل صنف انشرى من أرخص مورد له بنفس الفترة، كان التوفير تقريبًا <b>${cmpMoney(totalSaving)} ر.س</b>. (يحسب الأصناف اللي عند مورّدين أو أكثر فقط)</div>`;
+
+  const colSups = suppliers.filter(s=> rowsItems.some(I=> I.sup[s]));
+  const itemsTable = rowsItems.length ? `
+    <div style="font-weight:700;color:var(--forest);margin:18px 0 8px;">نفس الصنف عند كل مورد <span class="cmp-sub">— متوسط سعر الوحدة الصافي، وتحته آخر سعر وعدد الدفعات</span></div>
+    <table class="cmp-grid"><thead><tr><th>الصنف</th><th>الوحدة</th>${colSups.map(s=>`<th>${escapeHtml(s)}</th>`).join('')}<th>فرق الأغلى عن الأرخص</th></tr></thead><tbody>
+    ${rowsItems.map(I=>`<tr><td><b>${escapeHtml(I.name)}</b></td><td>${escapeHtml(I.unit)}</td>
+      ${colSups.map(s=>{
+        const S = I.sup[s];
+        if(!S) return '<td class="cmp-na">—</td>';
+        const cls = I.nSup < 2 ? '' : (S.avg <= I.min + 1e-9 ? 'cmp-best' : (S.avg >= I.max - 1e-9 ? 'cmp-worst' : ''));
+        return `<td class="${cls}"><div class="cmp-avg">${cmpMoney(S.avg)}</div><div class="cmp-meta">آخر ${cmpMoney(S.last)} · ${S.n} دفعة</div></td>`;
+      }).join('')}
+      <td class="num">${I.nSup >= 2 ? `<b>${cmpPct((I.max - I.min)/I.min)}</b> <span class="cmp-meta">(${cmpMoney(I.max - I.min)})</span>` : '<span class="cmp-meta">مورد واحد</span>'}</td></tr>`).join('')}
+    </tbody></table>`
+    : `<div class="cmp-note" style="margin-top:14px;">ما فيه صنف انشرى من أكثر من مورد في هالفترة. فعّل «عرض كل الأصناف» أو وسّع الفترة، أو اربط الأسماء المتشابهة تحت.</div>`;
+
+  // داخل المورد: تذبذب السعر بين الدفعات
+  const selSup = $('cmpSupplier');
+  const prevSup = selSup.value;
+  selSup.innerHTML = suppliers.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  if(prevSup && suppliers.includes(prevSup)) selSup.value = prevSup;
+  const sp = selSup.value;
+  const supItems = Object.values(items).filter(I=> I.sup[sp]).map(I=>{
+    const S = I.sup[sp];
+    const prices = S.batches.map(b=>b.price);
+    const mn = Math.min(...prices), mx = Math.max(...prices);
+    const first = prices[0], last = prices[prices.length-1];
+    return { I, S, mn, mx, vol: S.avg ? (mx - mn)/S.avg : 0, chg: first ? (last-first)/first : 0 };
+  }).sort((a,b)=> b.vol - a.vol);
+  const volTable = `
+    <table><thead><tr><th>الصنف</th><th>الوحدة</th><th>الدفعات</th><th>أقل سعر</th><th>أعلى سعر</th><th>المتوسط</th><th>آخر سعر</th><th>التذبذب</th><th>من أول دفعة لآخر دفعة</th></tr></thead><tbody>
+    ${supItems.map(({I,S,mn,mx,vol,chg})=>`<tr>
+      <td><details class="cmp-batches"><summary><b>${escapeHtml(I.name)}</b></summary>
+        ${S.batches.slice().reverse().map(b=>`<div>${escapeHtml(b.date||'')} · فاتورة ${escapeHtml(b.number||'—')} · ${r2(b.qty)} × <b>${cmpMoney(b.price)}</b></div>`).join('')}
+      </details></td>
+      <td>${escapeHtml(I.unit)}</td><td class="num">${S.n}</td>
+      <td class="num">${cmpMoney(mn)}</td><td class="num">${cmpMoney(mx)}</td><td class="num">${cmpMoney(S.avg)}</td><td class="num"><b>${cmpMoney(S.last)}</b></td>
+      <td class="num ${vol >= 0.15 ? 'cmp-hot' : ''}">${S.n > 1 ? cmpPct(vol) : '—'}</td>
+      <td class="num" style="color:${chg > 0.005 ? 'var(--clay)' : (chg < -0.005 ? '#2F5A22' : 'inherit')}">${S.n > 1 ? (chg > 0 ? '▲ ' : chg < 0 ? '▼ ' : '') + cmpPct(Math.abs(chg)) : '—'}</td>
+    </tr>`).join('')}
+    </tbody></table>
+    <div class="cmp-note">التذبذب = (أعلى سعر − أقل سعر) ÷ المتوسط. فوق 15% ينلوّن. اضغط على اسم الصنف تشوف كل دفعاته.</div>`;
+
+  box.innerHTML = supTable + itemsTable;
+  $('cmpSupBody').innerHTML = supItems.length ? volTable : '<div class="cmp-note">ما فيه مشتريات لهالمورد.</div>';
+  renderAliasTool();
+}
+
+// ---- ربط الأسماء المتشابهة (الإدارة فقط) ----
+function renderAliasTool(){
+  const wrap = $('cmpAliasWrap'); if(!wrap) return;
+  if(!isAdmin()){ wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  const cat = $('cmpCategory').value || '';
+  // كل الأسماء في هالتصنيف على كل الفترات
+  const names = {};
+  activeInvoices().forEach(inv=> (inv.items||[]).forEach(it=>{
+    if(cat && itemKey(it.category||'') !== itemKey(cat)) return;
+    const k = itemKey(it.name);
+    const e = names[k] || (names[k] = { name: it.name, n:0, sups:new Set() });
+    e.n++; e.sups.add(String(inv.supplier||'').trim());
+  }));
+  const al = catalog.aliases || {};
+  const list = Object.values(names).filter(e=> !al[itemKey(e.name)]).sort((a,b)=> a.name.localeCompare(b.name,'ar'));
+  const opts = list.map(e=>`<option value="${escapeHtml(e.name)}">${escapeHtml(e.name)} (${e.n})</option>`).join('');
+  // اقتراحات: أسماء تشترك في أغلب كلماتها وعند موردين مختلفين
+  const toks = s => new Set(itemKey(s).split(/[\s\-_/*×x]+/).filter(t=> t.length > 1));
+  const sugg = [];
+  for(let i=0;i<list.length;i++) for(let j=i+1;j<list.length;j++){
+    const a = toks(list[i].name), b = toks(list[j].name);
+    if(!a.size || !b.size) continue;
+    let inter = 0; a.forEach(t=>{ if(b.has(t)) inter++; });
+    const jac = inter / (a.size + b.size - inter);
+    const diffSup = [...list[i].sups].some(s=> !list[j].sups.has(s)) || [...list[j].sups].some(s=> !list[i].sups.has(s));
+    if(jac >= 0.5 && diffSup) sugg.push([list[i], list[j], jac]);
+  }
+  sugg.sort((a,b)=> b[2]-a[2]);
+  window._cmpSugg = sugg.slice(0, 12);
+  const current = Object.entries(al).filter(([k,v])=> !cat || names[k] || Object.values(names).some(e=> itemKey(e.name)===itemKey(v)));
+  $('cmpAliasBody').innerHTML = `
+    <div class="cmp-note" style="margin-top:0;">لو نفس الصنف مكتوب باسمين مختلفين عند الموردين، اربطهم هنا عشان ينقارنون كصنف واحد. الربط يأثر على هالتقرير بس — الفواتير نفسها ما تتغير.</div>
+    ${window._cmpSugg.length ? `<div style="font-weight:700;margin:10px 0 6px;">اقتراحات</div>
+      ${window._cmpSugg.map(([a,b],i)=>`<div class="cmp-alias-row"><span>«${escapeHtml(a.name)}» و «${escapeHtml(b.name)}»</span>
+        <button class="btn btn-outline" style="padding:5px 10px;font-size:12px;" onclick="linkSuggestion(${i})">نفس الصنف</button></div>`).join('')}` : ''}
+    <div style="font-weight:700;margin:12px 0 6px;">ربط يدوي</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <select id="aliasFrom" style="flex:1;min-width:160px;">${opts}</select>
+      <span style="color:var(--muted);font-size:12.5px;">نفس الصنف</span>
+      <select id="aliasTo" style="flex:1;min-width:160px;">${opts}</select>
+      <button class="btn btn-primary" style="padding:9px 14px;" onclick="linkAliasManual()">ربط</button>
+    </div>
+    ${current.length ? `<div style="font-weight:700;margin:14px 0 6px;">الأسماء المربوطة</div>
+      ${current.map(([k,v])=>`<div class="cmp-alias-row"><span>${escapeHtml(aliasLabel(k))} ← <b>${escapeHtml(v)}</b></span>
+        <button class="btn-ghost" onclick="unlinkAlias('${escapeHtml(k).replace(/'/g,"&#39;")}')">فك الربط</button></div>`).join('')}` : ''}`;
+}
+function aliasLabel(k){
+  for(const inv of invoices) for(const it of (inv.items||[])) if(itemKey(it.name)===k) return it.name;
+  return k;
+}
+async function setAlias(fromName, toName){
+  if(!isAdmin()) return;
+  const fk = itemKey(fromName);
+  let target = canonName(toName);
+  if(itemKey(target) === fk){ toast('اختر اسمين مختلفين'); return; }
+  const al = Object.assign({}, catalog.aliases || {});
+  al[fk] = target;
+  // أي اسم كان مربوط على الاسم القديم ينتقل للاسم المعتمد
+  Object.keys(al).forEach(k=>{ if(itemKey(al[k]) === fk) al[k] = target; });
+  catalog.aliases = al;
+  await pushCatalog();
+  toast(`«${fromName}» صار يُحسب مع «${target}»`);
+  renderCompare();
+}
+function linkSuggestion(i){
+  const s = (window._cmpSugg||[])[i]; if(!s) return;
+  const [a,b] = s;
+  // الاسم الأكثر استخدامًا يكون المعتمد
+  if(a.n >= b.n) setAlias(b.name, a.name); else setAlias(a.name, b.name);
+}
+function linkAliasManual(){
+  const f = $('aliasFrom').value, t = $('aliasTo').value;
+  if(!f || !t) return;
+  setAlias(f, t);
+}
+async function unlinkAlias(k){
+  if(!isAdmin()) return;
+  const al = Object.assign({}, catalog.aliases || {});
+  delete al[k];
+  catalog.aliases = al;
+  await pushCatalog();
+  renderCompare();
+}
+
+function setCmpPeriod(months){
+  $('cmpTo').value = todayStr();
+  $('cmpFrom').value = months ? isoMonthsAgo(months) : '';
+  document.querySelectorAll('.cmp-per').forEach(b=> b.classList.toggle('on', String(b.dataset.m) === String(months)));
+  renderCompare();
+}
+(function initCompare(){
+  if(!$('cmpBody')) return;
+  const cats = allCategories();
+  $('cmpCategory').innerHTML = `<option value="">كل التصنيفات</option>` + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  const flower = cats.find(c=> itemKey(c).includes(itemKey('الورد')));
+  if(flower) $('cmpCategory').value = flower;
+  $('cmpTo').value = todayStr(); $('cmpFrom').value = isoMonthsAgo(3);
+  document.querySelectorAll('.cmp-per').forEach(b=>{
+    b.classList.toggle('on', b.dataset.m === '3');
+    b.addEventListener('click', ()=> setCmpPeriod(+b.dataset.m));
+  });
+  ['cmpCategory','cmpFrom','cmpTo','cmpShowAll','cmpSupplier'].forEach(id=>{
+    $(id).addEventListener('change', ()=>{
+      if(id==='cmpFrom' || id==='cmpTo') document.querySelectorAll('.cmp-per').forEach(b=> b.classList.remove('on'));
+      renderCompare();
+    });
+  });
+})();
 
 (async ()=>{
   if(!createClientOnly()){
