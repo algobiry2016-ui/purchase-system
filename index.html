@@ -640,6 +640,7 @@
         <div class="stat"><div class="k">إجمالي الكميات</div><div class="v" id="statQty">0</div></div>
         <div class="stat"><div class="k">المشتريات النقدية</div><div class="v" id="statCash">0.00 ر.س</div></div>
         <div class="stat"><div class="k">المشتريات الآجلة</div><div class="v" id="statCredit">0.00 ر.س</div></div>
+        <div class="stat" title="رصيد الموردين الحالي بعد خصم السدادات — ما يتأثر بفلتر التاريخ أو التصنيف"><div class="k">المتبقي للموردين حاليًا</div><div class="v" id="statOutstanding">0.00 ر.س</div></div>
         <div class="stat" style="grid-column:span 3;background:var(--olive-light);border-color:#DDE2C9;">
           <div class="k">الإجمالي الكلي للمشتريات</div><div class="v" id="statNet">0.00 ر.س</div>
         </div>
@@ -708,7 +709,7 @@
         </div>
         <div class="card-body" id="topItems"></div>
       </div>
-      <div class="card" id="cmpCard">
+      <div class="card" id="cmpCard" style="display:none;">
         <div class="card-head"><h2>مقارنة أسعار الموردين</h2><span class="hint">سعر الوحدة الصافي بعد الخصم والضريبة</span></div>
         <div class="card-body">
           <div class="grid4" style="align-items:end;margin-bottom:12px;">
@@ -728,7 +729,7 @@
           <div id="cmpBody"></div>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="cmpSupCard" style="display:none;">
         <div class="card-head"><h2>أسعار المورد بين الدفعات</h2>
           <select id="cmpSupplier" style="width:220px;padding:7px 9px;font-size:12.5px;"></select></div>
         <div class="card-body" id="cmpSupBody"></div>
@@ -2955,7 +2956,9 @@ function renderStats(){
   const invIds = new Set(lines.map(l=>l.invoiceId));
   const net   = r2(lines.reduce((s,l)=>s+l.total,0));
   const cash  = r2(lines.reduce((s,l)=>s+l.paidShare,0));
-  const credit= creditOutstanding(f);
+  // النقدي + الآجل = الإجمالي دائمًا (نفس الفلاتر ونفس الفواتير)
+  const credit= r2(lines.reduce((s,l)=>s+l.dueShare,0));
+  const outstanding = creditOutstanding(f);   // الدين الحالي بعد السدادات (رقم منفصل)
   const qty   = r2(lines.reduce((s,l)=>s+l.qty,0));
   const items = new Set(lines.map(l=>l.key));
 
@@ -2964,6 +2967,7 @@ function renderStats(){
   $('statQty').textContent    = qty;
   $('statCash').textContent   = money(cash);
   $('statCredit').textContent = money(credit);
+  $('statOutstanding').textContent = money(outstanding);
   $('statNet').textContent    = money(net);
 
   const active = [];
@@ -3879,6 +3883,10 @@ function syncCmpCats(){
 }
 function renderCompare(){
   const box = $('cmpBody'); if(!box) return;
+  // تقرير المقارنة للإدارة فقط
+  const adm = isAdmin();
+  ['cmpCard','cmpSupCard','cmpAliasWrap'].forEach(id=>{ const el = $(id); if(el) el.style.display = adm ? '' : 'none'; });
+  if(!adm){ box.innerHTML = ''; $('cmpSupBody').innerHTML = ''; return; }
   syncCmpCats();
   const lines = cmpLines();
   if(!lines.length){
