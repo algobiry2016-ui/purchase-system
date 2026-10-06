@@ -178,6 +178,10 @@
   .rep-total{display:flex;justify-content:space-between;padding:13px 18px;background:#F7F8F4;border-top:1px solid var(--line);font-size:14px;}
   .rep-total b{color:var(--forest);font-size:17px;font-feature-settings:"tnum" 1;}
   .mini-actions{display:flex;gap:6px;}
+  /* تنبيه الأسماء المتشابهة + المنشأ */
+  .sim-hint{font-size:12px;color:#8A6D0B;margin-top:4px;min-height:0;}
+  .sim-hint button{background:#F2EDD4;border:1px solid #E2D59A;color:#6B5408;border-radius:3px;padding:1px 8px;font-family:inherit;font-size:12px;cursor:pointer;margin:0 3px;}
+  .org-tag{display:inline-block;font-size:11px;background:#E8EEF4;color:#2B4A66;border-radius:20px;padding:0 7px;margin-inline-start:5px;font-weight:600;}
   /* مقارنة الموردين */
   .cmp-per{white-space:nowrap;}
   .cmp-per.on{background:var(--forest);color:#fff;border-color:var(--forest);}
@@ -374,7 +378,7 @@
             <div class="field"><label>التاريخ</label><input type="date" id="invDate"></div>
           </div>
           <div class="grid2">
-            <div class="field"><label>اسم المورد</label><input type="text" id="invSupplier" placeholder="مؤسسة التوريدات" list="supplierList"></div>
+            <div class="field"><label>اسم المورد</label><input type="text" id="invSupplier" placeholder="مؤسسة التوريدات" list="supplierList"><div class="sim-hint" id="supSim"></div></div>
             <div class="field"><label>مندوب المشتريات</label><input type="text" id="invRep" placeholder="اسم المندوب"></div>
           </div>
           <div class="grid2" id="branchFieldWrap" style="margin-top:14px;">
@@ -399,7 +403,7 @@
         <div class="card-head"><h2>إضافة صنف</h2><span class="hint" id="itemHint"></span></div>
         <div class="card-body">
           <div class="grid4" style="margin-bottom:14px;">
-            <div class="field"><label>اسم الصنف</label><input type="text" id="itName" placeholder="كابل كهرباء 2 مم" list="itemList"></div>
+            <div class="field"><label>اسم الصنف</label><input type="text" id="itName" placeholder="كابل كهرباء 2 مم" list="itemList"><div class="sim-hint" id="itSim"></div></div>
             <div class="field"><label>التصنيف</label><select id="itCategory"></select></div>
             <div class="field"><label>الوحدة</label><select id="itUnit"></select></div>
             <div class="field"><label>الكمية</label><input type="number" id="itQty" min="0" step="any" placeholder="0"></div>
@@ -409,7 +413,9 @@
           <div class="grid4" style="align-items:end;">
             <div class="field"><label>سعر شراء الوحدة</label><input type="number" id="itPrice" min="0" step="0.01" placeholder="0.00"></div>
             <div class="field"><label>إجمالي الصنف</label><input type="text" id="itTotal" readonly value="0.00"></div>
-            <div class="field" style="grid-column:span 2;"><button class="btn btn-primary btn-block" id="btnAddItem">إضافة الصنف</button></div>
+            <div class="field" id="itOriginWrap" style="display:none;"><label>المنشأ <span style="font-weight:400;color:var(--muted);font-size:11px;">(اختياري)</span></label>
+              <select id="itOrigin"><option value="">— غير محدد —</option><option>هولندي</option><option>كيني</option><option>محلي</option><option>غيره</option></select></div>
+            <div class="field"><button class="btn btn-primary btn-block" id="btnAddItem">إضافة الصنف</button></div>
           </div>
         </div>
 
@@ -563,10 +569,11 @@
             <div class="field"><label>تاريخ السداد</label><input type="date" id="payDate"></div>
             <div class="field"><label>طريقة السداد</label>
               <select id="payMethod">
-                <option value="نقدًا">نقدًا</option>
+                <option value="" selected disabled>— اختر الطريقة —</option>
                 <option value="تحويل بنكي">تحويل بنكي</option>
+                <option value="نقدًا">نقدًا</option>
                 <option value="شيك">شيك</option>
-                <option value="أخرى">أخرى</option>
+                <option value="شبكة">شبكة</option>
               </select>
             </div>
             <div class="field"><button class="btn btn-primary btn-block" id="btnSavePayment">تسجيل السداد</button></div>
@@ -641,6 +648,8 @@
         <div class="stat"><div class="k">المشتريات النقدية</div><div class="v" id="statCash">0.00 ر.س</div></div>
         <div class="stat"><div class="k">المشتريات الآجلة</div><div class="v" id="statCredit">0.00 ر.س</div></div>
         <div class="stat" title="رصيد الموردين الحالي بعد خصم السدادات — ما يتأثر بفلتر التاريخ أو التصنيف"><div class="k">المتبقي للموردين حاليًا</div><div class="v" id="statOutstanding">0.00 ر.س</div></div>
+        <div class="stat" title="التصنيفات المحددة «بضاعة» في الإعدادات"><div class="k">إجمالي البضاعة</div><div class="v" id="statGoods">0.00 ر.س</div></div>
+        <div class="stat" title="التصنيفات المحددة «مصروف» في الإعدادات"><div class="k">إجمالي المصروفات</div><div class="v" id="statExpense">0.00 ر.س</div></div>
         <div class="stat" style="grid-column:span 3;background:var(--olive-light);border-color:#DDE2C9;">
           <div class="k">الإجمالي الكلي للمشتريات</div><div class="v" id="statNet">0.00 ر.س</div>
         </div>
@@ -1160,6 +1169,7 @@ function itemStats(name, list){
     totalValue: r2(totalVal),
     avgPrice: totalQty > 0 ? r2(totalVal/totalQty) : 0,
     lastPrice: last.price,
+    minPrice: Math.min(...ops.map(o=> num(o.price))),
     lastSupplier: last.supplier,
     lastDate: last.date
   };
@@ -1182,7 +1192,8 @@ function normalizeCatalog(c){
   return {
     units: clean(c && c.units, DEFAULT_UNITS),
     categories: clean(c && c.categories, DEFAULT_CATEGORIES),
-    aliases: (c && c.aliases && typeof c.aliases === 'object' && !Array.isArray(c.aliases)) ? c.aliases : {}
+    aliases: (c && c.aliases && typeof c.aliases === 'object' && !Array.isArray(c.aliases)) ? c.aliases : {},
+    entryTypes: (c && c.entryTypes && typeof c.entryTypes === 'object' && !Array.isArray(c.entryTypes)) ? c.entryTypes : {}
   };
 }
 
@@ -1287,12 +1298,14 @@ function renderCatalogLists(){
   const box = (id, kind, values) => {
     const el = $(id);
     if(!el) return;
-    el.innerHTML = `<table><thead><tr><th>${kind==='category'?'التصنيف':'الوحدة'}</th><th style="width:120px;">مستخدم في</th><th style="width:170px;"></th></tr></thead><tbody>
+    el.innerHTML = `<table><thead><tr><th>${kind==='category'?'التصنيف':'الوحدة'}</th>${kind==='category'?'<th style="width:120px;">نوع القيد</th>':''}<th style="width:120px;">مستخدم في</th><th style="width:170px;"></th></tr></thead><tbody>
       ${values.map(v=>{
         const n = usageCount(kind, v);
         const inCat = (kind==='category' ? catalog.categories : catalog.units).some(x=>itemKey(x)===itemKey(v));
         return `<tr>
           <td>${escapeHtml(v)}${inCat?'':' <span class="badge badge-edit">من فواتير سابقة</span>'}</td>
+          ${kind==='category' ? `<td><select class="cell" style="min-width:95px" onchange="setEntryType('${escapeHtml(v).replace(/'/g,"\\'")}', this.value)" ${isAdmin()?'':'disabled'}>
+            <option${entryTypeOf(v)==='بضاعة'?' selected':''}>بضاعة</option><option${entryTypeOf(v)==='مصروف'?' selected':''}>مصروف</option></select></td>` : ''}
           <td class="num">${n} صنف</td>
           <td><div class="mini-actions">
             <button onclick="renameCatalogEntry('${kind}','${escapeHtml(v).replace(/'/g,"\\'")}')">تعديل</button>
@@ -1340,6 +1353,10 @@ async function renameCatalogEntry(kind, oldVal){
 
   if(affected.length && !confirm(`سيتم تحديث ${affected.length} فاتورة تستخدم "${oldVal}". متابعة؟`)) return;
 
+  if(kind==='category' && catalog.entryTypes && catalog.entryTypes[itemKey(oldVal)]){
+    catalog.entryTypes[itemKey(newVal)] = catalog.entryTypes[itemKey(oldVal)];
+    delete catalog.entryTypes[itemKey(oldVal)];
+  }
   const i = list.findIndex(x=> itemKey(x)===itemKey(oldVal));
   if(i >= 0){
     if(list.some(x=> itemKey(x)===itemKey(newVal) && itemKey(x)!==itemKey(oldVal))) list.splice(i,1);
@@ -1443,6 +1460,104 @@ function renderItemCatalog(){
 }
 
 
+
+// ============================================================
+//  تنبيه "تقصد…؟" للأسماء القريبة (أصناف وموردين) — ما يمنع الحفظ
+// ============================================================
+function editDist(a, b){
+  if(Math.abs(a.length - b.length) > 3) return 99;
+  const dp = Array.from({length:a.length+1}, (_,i)=> [i]);
+  for(let j=1;j<=b.length;j++) dp[0][j] = j;
+  for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++)
+    dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1] + (a[i-1]===b[j-1]?0:1));
+  return dp[a.length][b.length];
+}
+function findSimilar(name, candidates){
+  const k = itemKey(name).replace(/\s+/g,'');
+  if(k.length < 3) return null;
+  let best = null, bestD = 99;
+  candidates.forEach(c=>{
+    const ck = itemKey(c).replace(/\s+/g,'');
+    if(!ck || ck === k) return;
+    let d = editDist(k, ck);
+    // "بلو دي شانيل" داخل "عطر بلو دي شانيل"
+    if(d > 2 && Math.min(k.length, ck.length) >= 5 && (ck.includes(k) || k.includes(ck))) d = 2;
+    const limit = k.length <= 5 ? 1 : 2;
+    if(d <= limit && d < bestD){ bestD = d; best = c; }
+  });
+  return best;
+}
+function showSimHint(inputId, hintId, candidates, onPick){
+  const v = $(inputId).value.trim(), box = $(hintId);
+  box.innerHTML = '';
+  if(!v || candidates.some(c=> itemKey(c) === itemKey(v))) return;
+  const s = findSimilar(v, candidates);
+  if(!s) return;
+  box.innerHTML = `تقصد <button type="button">${escapeHtml(s)}</button>؟ <span style="color:var(--muted)">(أو كمّل بكتابتك لو صنف مختلف)</span>`;
+  // mousedown بدل click: عشان blur الحقل ما يعيد رسم التنبيه قبل ما ينضغط الزر
+  box.querySelector('button').addEventListener('mousedown', e=>{ e.preventDefault(); $(inputId).value = s; box.innerHTML = ''; if(onPick) onPick(); });
+}
+function knownSuppliers(){
+  const set = new Map();
+  invoices.forEach(i=>{ const s = String(i.supplier||'').trim(); if(s && !set.has(itemKey(s))) set.set(itemKey(s), s); });
+  return [...set.values()];
+}
+function knownItemNames(){
+  const set = new Map();
+  invoices.forEach(inv=> (inv.items||[]).forEach(it=>{ const n = String(it.name||'').trim(); if(n && !set.has(itemKey(n))) set.set(itemKey(n), n); }));
+  return [...set.values()];
+}
+['change','blur'].forEach(ev=>{
+  $('invSupplier').addEventListener(ev, ()=> showSimHint('invSupplier','supSim', knownSuppliers(), fillOriginDefault));
+  $('itName').addEventListener(ev, ()=> showSimHint('itName','itSim', knownItemNames(), showItemInfo));
+});
+
+// ============================================================
+//  المنشأ (للورد — اختياري)
+// ============================================================
+function isFlowerCat(cat){
+  const k = itemKey(cat||'');
+  return k.includes(itemKey('ورد')) && !k.includes(itemKey('صناعي'));
+}
+function toggleOriginField(){
+  const show = isFlowerCat($('itCategory').value);
+  $('itOriginWrap').style.display = show ? '' : 'none';
+  if(!show) $('itOrigin').value = '';
+}
+// يتعبّى من آخر شراء لنفس الصنف من نفس المورد (أو من أي مورد)
+function fillOriginDefault(){
+  if(!isFlowerCat($('itCategory').value) || $('itOrigin').value) return;
+  const nk = itemKey($('itName').value), sk = itemKey($('invSupplier').value);
+  if(!nk) return;
+  let sameSup = '', any = '';
+  invoices.slice().sort((a,b)=> String(a.date).localeCompare(String(b.date))).forEach(inv=>{
+    (inv.items||[]).forEach(it=>{
+      if(itemKey(it.name) !== nk || !it.origin) return;
+      any = it.origin;
+      if(itemKey(inv.supplier) === sk) sameSup = it.origin;
+    });
+  });
+  const v = sameSup || any;
+  if(v) $('itOrigin').value = v;
+}
+$('itCategory').addEventListener('change', ()=>{ toggleOriginField(); fillOriginDefault(); });
+
+// ============================================================
+//  نوع القيد لكل تصنيف (بضاعة / مصروف)
+// ============================================================
+function entryTypeOf(cat){
+  const t = catalog.entryTypes && catalog.entryTypes[itemKey(cat||'')];
+  return t === 'مصروف' ? 'مصروف' : 'بضاعة';
+}
+async function setEntryType(cat, val){
+  const et = Object.assign({}, catalog.entryTypes || {});
+  if(val === 'مصروف') et[itemKey(cat)] = 'مصروف'; else delete et[itemKey(cat)];
+  catalog.entryTypes = et;
+  await pushCatalog();
+  toast(`«${cat}» صار ${val}`);
+  if(typeof renderReports === 'function') renderReports();
+}
+
 // ---- item entry ----
 function calcItemTotal(){
   $('itTotal').value = r2(num($('itQty').value) * num($('itPrice').value)).toFixed(2);
@@ -1472,6 +1587,7 @@ function showItemInfo(){
     `<br>` +
     `<span class="chip">آخر سعر شراء: <b>${st.lastPrice.toFixed(2)}</b> ر.س</span>` +
     `<span class="chip">متوسط سعر الشراء: <b>${st.avgPrice.toFixed(2)}</b> ر.س</span>` +
+    `<span class="chip">أفضل سعر سابق: <b>${st.minPrice.toFixed(2)}</b> ر.س</span>` +
     `<span class="chip">إجمالي الكمية المشتراة: <b>${st.totalQty}</b></span>` +
     `<span class="chip">إجمالي قيمة المشتريات: <b>${st.totalValue.toFixed(2)}</b> ر.س</span>` +
     (st.lastSupplier ? `<br><span class="chip">آخر مورد: ${escapeHtml(st.lastSupplier)} — ${formatDate(st.lastDate)}</span>` : '');
@@ -1481,6 +1597,7 @@ function showItemInfo(){
   if(unit && [...$('itUnit').options].some(o=>o.value===unit)) $('itUnit').value = unit;
   if(cat && [...$('itCategory').options].some(o=>o.value===cat)) $('itCategory').value = cat;
   if(!$('itPrice').value){ $('itPrice').value = st.lastPrice; calcItemTotal(); }
+  toggleOriginField(); fillOriginDefault();
 }
 $('itName').addEventListener('change', showItemInfo);
 $('itName').addEventListener('blur', showItemInfo);
@@ -1498,15 +1615,17 @@ $('btnAddItem').addEventListener('click', ()=>{
   if(price<0){ toast('سعر الشراء لا يمكن أن يكون سالبًا'); $('itPrice').focus(); return; }
 
   // دمج مع صنف مطابق داخل نفس الفاتورة إذا كان السعر والوحدة نفسها
-  const same = currentItems.find(it => itemKey(it.name)===itemKey(name) && it.unit===unit && r2(it.price)===r2(price));
+  const origin = isFlowerCat(category) ? ($('itOrigin').value || '') : '';
+  const same = currentItems.find(it => itemKey(it.name)===itemKey(name) && it.unit===unit && r2(it.price)===r2(price) && (it.origin||'')===origin);
   if(same){
     same.qty = r2(same.qty + qty);
     same.total = r2(same.qty * same.price);
   }else{
-    currentItems.push({name, category, unit, qty, price, total: r2(qty*price)});
+    currentItems.push({name, category, unit, qty, price, total: r2(qty*price), origin});
   }
 
   $('itName').value=''; $('itQty').value=''; $('itPrice').value=''; $('itTotal').value='0.00';
+  $('itOrigin').value=''; $('itSim').innerHTML='';
   $('itemInfo').style.display='none'; $('itemHint').textContent='';
   $('itName').focus();
   renderItemsTable();
@@ -1523,7 +1642,7 @@ function renderItemsTable(){
     const cats = allCategories(), units = allUnits();
     body.innerHTML = currentItems.map((it,i)=>`
       <tr>
-        <td>${escapeHtml(it.name)}</td>
+        <td>${escapeHtml(it.name)}${it.origin ? `<span class="org-tag">${escapeHtml(it.origin)}</span>` : ''}</td>
         <td><select class="cell" onchange="updateItemField(${i},'category',this.value)">
           ${cats.map(c=>`<option value="${escapeHtml(c)}"${itemKey(c)===itemKey(it.category||'')?' selected':''}>${escapeHtml(c)}</option>`).join('')}
           ${it.category && !cats.some(c=>itemKey(c)===itemKey(it.category)) ? `<option value="${escapeHtml(it.category)}" selected>${escapeHtml(it.category)}</option>` : ''}
@@ -1739,7 +1858,8 @@ function editInvoice(id){
       name: it.name, category: it.category || '', unit: it.unit,
       qty: num(it.qty), price: r2(entered), total: r2(num(it.qty)*entered),
       // الفواتير القديمة قبل الربط تُعتبر غير مخزنية حتى لا تنرسل للمخزون بأثر رجعي
-      stock: (it.stock === true || it.stock === false) ? it.stock : false
+      stock: (it.stock === true || it.stock === false) ? it.stock : false,
+      origin: it.origin || ''
     };
   });
   enterEditMode(inv);
@@ -1815,6 +1935,7 @@ function diffInvoices(oldInv, newInv){
     if(r2(o.qty)   !== r2(n.qty))   changes.push({ field:`الكمية — ${o.name}`, from:String(r2(o.qty)), to:String(r2(n.qty)) });
     if(r2(o.price) !== r2(n.price)) changes.push({ field:`سعر الشراء — ${o.name}`, from:r2(o.price).toFixed(2), to:r2(n.price).toFixed(2) });
     if(o.unit !== n.unit)           changes.push({ field:`الوحدة — ${o.name}`, from:o.unit, to:n.unit });
+    if((o.origin||'') !== (n.origin||'')) changes.push({ field:`المنشأ — ${o.name}`, from:o.origin||'—', to:n.origin||'—' });
     if(!!o.stock !== !!n.stock)     changes.push({ field:`مخزني — ${o.name}`, from:o.stock?'نعم':'لا', to:n.stock?'نعم':'لا' });
   });
   Object.keys(newMap).forEach(k=>{
@@ -1840,7 +1961,8 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
   const rawItemsForSave = currentItems.map(it=>({
     name: it.name.trim(), category: it.category || '', unit: it.unit,
     qty: r2(num(it.qty)), price: r2(num(it.price)), total: r2(num(it.qty)*num(it.price)),
-    stock: it.stock === true ? true : (it.stock === false ? false : null)
+    stock: it.stock === true ? true : (it.stock === false ? false : null),
+    origin: it.origin ? String(it.origin) : ''
   }));
   const itemsForSave = netUnitPriceItems(rawItemsForSave, t.discountAmount, t.vatAmount, t.subtotal);
 
@@ -1998,7 +2120,8 @@ function rowToInvoice(r){
     price: num(it.price),
     total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
     priceEntered: it.priceEntered != null ? num(it.priceEntered) : null,
-    stock: it.stock === true ? true : (it.stock === false ? false : null)
+    stock: it.stock === true ? true : (it.stock === false ? false : null),
+    origin: it.origin ? String(it.origin) : ''
   }));
   const computedSub = r2(items.reduce((s,it)=>s+it.total,0));
   const subtotal = r.subtotal != null ? r2(num(r.subtotal)) : computedSub;
@@ -2042,7 +2165,8 @@ function invoiceToRow(inv){
     qty: r2(num(it.qty)), price: r2(num(it.price)),
     total: r2(it.total != null ? num(it.total) : num(it.qty)*num(it.price)),
     priceEntered: it.priceEntered != null ? r2(num(it.priceEntered)) : r2(num(it.price)),
-    stock: it.stock === true ? true : (it.stock === false ? false : null)
+    stock: it.stock === true ? true : (it.stock === false ? false : null),
+    origin: it.origin ? String(it.origin) : ''
   }));
   const subtotal = inv.subtotal != null ? r2(num(inv.subtotal)) : r2(items.reduce((s,it)=>s+it.total,0));
   const discountAmount = r2(num(inv.discountAmount));
@@ -2533,6 +2657,7 @@ $('btnSavePayment').addEventListener('click', async ()=>{
   if(!supplier){ toast('اكتب اسم المورد'); $('paySupplier').focus(); return; }
   if(amount <= 0){ toast('أدخل مبلغ سداد أكبر من صفر'); $('payAmount').focus(); return; }
   if(!date){ toast('أدخل تاريخ السداد'); $('payDate').focus(); return; }
+  if(!$('payMethod').value){ toast('اختر طريقة السداد'); $('payMethod').focus(); return; }
   if(!sb){ toast('غير متصل بقاعدة البيانات'); return; }
 
   const b = supplierBalance(supplier);
@@ -2557,7 +2682,7 @@ $('btnSavePayment').addEventListener('click', async ()=>{
     const { error } = await sb.from(PAYMENTS_TABLE).insert(paymentRowTo(payment));
     if(error) throw error;
     await pullPayments(true);
-    $('payAmount').value = ''; $('payNotes').value = '';
+    $('payAmount').value = ''; $('payNotes').value = ''; $('payMethod').value = '';
     renderPayments();
     const after = supplierBalance(supplier);
     toast(`تم تسجيل سداد ${r2(amount).toFixed(2)} ر.س — المتبقي على ${supplier}: ${after.balance.toFixed(2)} ر.س`);
@@ -2731,7 +2856,7 @@ function renderLog(){
         <table>
           <thead><tr><th>الصنف</th><th>التصنيف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>إجمالي الصنف</th><th>المخزون</th></tr></thead>
           <tbody>
-            ${inv.items.map((it,ix)=>`<tr><td>${escapeHtml(it.name)}</td><td>${escapeHtml(it.category||'—')}</td><td>${escapeHtml(it.unit)}</td><td class="num">${r2(it.qty)}</td><td class="num">${r2(it.price).toFixed(2)}</td><td class="num">${r2(it.total).toFixed(2)}</td><td>${stockStatusBadge(it, rids[ix], cancelled)}</td></tr>`).join('')}
+            ${inv.items.map((it,ix)=>`<tr><td>${escapeHtml(it.name)}${it.origin ? `<span class="org-tag">${escapeHtml(it.origin)}</span>` : ''}</td><td>${escapeHtml(it.category||'—')}</td><td>${escapeHtml(it.unit)}</td><td class="num">${r2(it.qty)}</td><td class="num">${r2(it.price).toFixed(2)}</td><td class="num">${r2(it.total).toFixed(2)}</td><td>${stockStatusBadge(it, rids[ix], cancelled)}</td></tr>`).join('')}
           </tbody>
         </table>
         <div class="sum-block" style="margin-top:12px;border:1px solid var(--line);border-radius:5px;">
@@ -2898,7 +3023,9 @@ function purchaseLines(opts){
         gross: lineTotal,
         discShare, vatShare,
         paidShare,                        // نقدًا
-        dueShare: r2(net - paidShare)     // آجل
+        dueShare: r2(net - paidShare),    // آجل
+        branch: inv.branch || DEFAULT_BRANCH,
+        origin: it.origin || ''
       });
     });
   });
@@ -2969,6 +3096,9 @@ function renderStats(){
   $('statCredit').textContent = money(credit);
   $('statOutstanding').textContent = money(outstanding);
   $('statNet').textContent    = money(net);
+  const expense = r2(lines.filter(l=> entryTypeOf(l.category) === 'مصروف').reduce((s,l)=>s+l.total,0));
+  $('statGoods').textContent   = money(r2(net - expense));
+  $('statExpense').textContent = money(expense);
 
   const active = [];
   if(f.from) active.push('من ' + formatDate(f.from));
@@ -3312,10 +3442,29 @@ function exportRows(cats, showPrices, lines){
   rows.push(pad('إجمالي الكميات', totalQty));
   rows.push(pad('المشتريات النقدية', cash.toFixed(2)));
   rows.push(pad('المشتريات الآجلة', credit.toFixed(2)));
+  if(lines){
+    const exp = r2(lines.filter(l=> entryTypeOf(l.category) === 'مصروف').reduce((s,l)=>s+l.total,0));
+    rows.push(pad('إجمالي البضاعة', r2(grand - exp).toFixed(2)));
+    rows.push(pad('إجمالي المصروفات', exp.toFixed(2)));
+  }
   rows.push(pad('الإجمالي الكلي للمشتريات', grand.toFixed(2)));
   return { header, rows };
 }
 
+// رأس ملف التصدير: الفترة والفرع
+function exportMeta(which){
+  let period = '';
+  if(which === 'daily') period = formatDate($('dailyDate').value);
+  else if(which === 'monthly'){
+    const [y,m] = ($('monthlyMonth').value||'').split('-');
+    period = y ? (monthNamesAr[parseInt(m,10)-1] + ' ' + y) : '';
+  }else{
+    const f = readFilters();
+    period = (f.from || f.to) ? `من ${f.from ? formatDate(f.from) : 'البداية'} إلى ${f.to ? formatDate(f.to) : 'اليوم'}` : 'كل الفترات';
+  }
+  const br = ($('fltBranch') && $('fltBranch').value) || (currentUserBranch && currentUserBranch !== 'all' ? currentUserBranch : 'كل الفروع');
+  return [['الفترة', period], ['الفرع', br]];
+}
 function exportReport(which, kind){
   const conf = {
     daily:   { cats: lastDailyCats,   lines: lastDailyLines,   prices:false, name:'تقرير-المشتريات-اليومي' },
@@ -3324,14 +3473,24 @@ function exportReport(which, kind){
   }[which];
   if(!conf || !conf.cats.length){ toast('لا توجد بيانات لتصديرها'); return; }
   const { header, rows } = exportRows(conf.cats, conf.prices, conf.lines);
-  if(kind === 'csv'){ downloadCsv(header, rows, conf.name); return; }
+  const meta = exportMeta(which);
+  if(kind === 'csv'){ downloadCsv(meta[0], [meta[1], [], header, ...rows], conf.name); return; }
   if(typeof XLSX === 'undefined'){ toast('تعذّر تحميل مكتبة إكسل — تحقق من الاتصال بالإنترنت'); return; }
-  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  const ws = XLSX.utils.aoa_to_sheet([meta[0], meta[1], [], header, ...rows]);
   ws['!cols'] = header.map(()=>({wch:20}));
   ws['!views'] = [{ RTL: true }];        // ورقة عربية من اليمين إلى اليسار
   const wb = XLSX.utils.book_new();
   wb.Workbook = { Views: [{ RTL: true }] };
   XLSX.utils.book_append_sheet(wb, ws, 'تقرير');
+  // ورقة التفاصيل: كل سطر شراء بمورده وفرعه
+  const dh = ['التاريخ','رقم الفاتورة','المورد','الفرع','التصنيف','نوع القيد','الصنف','المنشأ','الكمية','الوحدة','سعر الوحدة الصافي','المبلغ'];
+  const dr = (conf.lines||[]).slice().sort((a,b)=> String(a.date).localeCompare(String(b.date))).map(l=>[
+    l.date, l.number||'', l.supplier||'', l.branch||'', l.category||'', entryTypeOf(l.category), l.name, l.origin||'',
+    l.qty, l.unit, l.qty ? r2(l.total/l.qty) : 0, r2(l.total)]);
+  const ws2 = XLSX.utils.aoa_to_sheet([meta[0], meta[1], [], dh, ...dr]);
+  ws2['!cols'] = dh.map((h,i)=>({wch: [12,12,24,10,18,10,30,9,8,8,14,12][i]}));
+  ws2['!views'] = [{ RTL: true }];
+  XLSX.utils.book_append_sheet(wb, ws2, 'التفاصيل');
   XLSX.writeFile(wb, conf.name + '.xlsx');
   toast('تم تصدير ملف إكسل');
 }
@@ -3845,7 +4004,7 @@ function cmpLines(){
   return lines.filter(l=> l.qty > 0 && l.total > 0).map(l=>{
     const cn = canonName(l.name);
     return Object.assign({}, l, {
-      cname: cn, ckey: itemKey(cn) + '|' + itemKey(l.unit),
+      cname: cn + (l.origin ? ' — ' + l.origin : ''), ckey: itemKey(cn) + '|' + itemKey(l.unit) + '|' + itemKey(l.origin||''),
       unitNet: l.total / l.qty, supplier: String(l.supplier||'').trim() || '—'
     });
   });
