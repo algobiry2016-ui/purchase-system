@@ -630,10 +630,13 @@
             </div>
           </div>
           <div class="field" style="margin-top:14px;">
-            <label>استبعاد أصناف من التقرير</label>
-            <div style="display:flex;gap:8px;max-width:520px;">
-              <input type="text" id="fltExcludeInput" list="itemList" placeholder="اكتب اسم الصنف واضغط استبعاد" style="flex:1;">
-              <button class="btn btn-outline" id="btnFltExclude" style="padding:9px 14px;font-size:12.5px;">استبعاد</button>
+            <label>استبعاد من التقرير</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <div style="display:flex;gap:8px;flex:1;min-width:260px;max-width:520px;">
+                <input type="text" id="fltExcludeInput" list="itemList" placeholder="اكتب اسم الصنف واضغط استبعاد" style="flex:1;">
+                <button class="btn btn-outline" id="btnFltExclude" style="padding:9px 14px;font-size:12.5px;">استبعاد صنف</button>
+              </div>
+              <select id="fltExcludeCat" style="flex:0 1 240px;min-width:200px;"><option value="">استبعاد تصنيف كامل…</option></select>
             </div>
             <div id="fltExcludeChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
           </div>
@@ -2988,7 +2991,8 @@ function readFilters(){
     category: $('fltCategory').value.trim(),
     unit: $('fltUnit').value,
     branch: $('fltBranch') ? $('fltBranch').value : '',
-    exclude: excludedItems.map(e=> e.key)
+    exclude: excludedItems.filter(e=> e.type !== 'cat').map(e=> e.key),
+    excludeCats: excludedItems.filter(e=> e.type === 'cat').map(e=> e.key)
   };
 }
 
@@ -2996,7 +3000,7 @@ function readFilters(){
 var excludedItems = [];   // [{key, name}]
 function renderExcludeChips(){
   $('fltExcludeChips').innerHTML = excludedItems.map((e,i)=>
-    `<span class="chip" style="background:#F6DFD8;color:var(--clay);display:inline-flex;align-items:center;gap:6px;">${escapeHtml(e.name)}
+    `<span class="chip" style="background:#F6DFD8;color:var(--clay);display:inline-flex;align-items:center;gap:6px;">${e.type==='cat' ? 'تصنيف: ' : ''}${escapeHtml(e.name)}
       <button type="button" onclick="removeExclude(${i})" title="إرجاع للتقرير" style="border:none;background:none;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0;">×</button></span>`).join('');
 }
 function addExclude(){
@@ -3004,12 +3008,27 @@ function addExclude(){
   if(!v) return;
   const k = itemKey(v);
   if(!knownItemNames().some(n=> itemKey(n) === k)){ toast('ما لقيت صنف بهالاسم — اختره من القائمة'); return; }
-  if(!excludedItems.some(e=> e.key === k)) excludedItems.push({ key:k, name:v });
+  if(!excludedItems.some(e=> e.key === k && e.type !== 'cat')) excludedItems.push({ key:k, name:v, type:'item' });
   $('fltExcludeInput').value = '';
   renderExcludeChips(); renderReports();
 }
 function removeExclude(i){ excludedItems.splice(i,1); renderExcludeChips(); renderReports(); }
 $('btnFltExclude').addEventListener('click', addExclude);
+function fillExcludeCats(){
+  const sel = $('fltExcludeCat');
+  sel.innerHTML = '<option value="">استبعاد تصنيف كامل…</option>' +
+    allCategories().filter(c=> !excludedItems.some(e=> e.type==='cat' && e.key===itemKey(c)))
+      .map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+}
+$('fltExcludeCat').addEventListener('focus', fillExcludeCats);
+$('fltExcludeCat').addEventListener('mousedown', fillExcludeCats);
+$('fltExcludeCat').addEventListener('change', ()=>{
+  const c = $('fltExcludeCat').value;
+  if(!c) return;
+  if(!excludedItems.some(e=> e.type==='cat' && e.key===itemKey(c))) excludedItems.push({ key:itemKey(c), name:c, type:'cat' });
+  $('fltExcludeCat').value = '';
+  renderExcludeChips(); renderReports();
+});
 $('fltExcludeInput').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addExclude(); } });
 
 // تسطيح كل عمليات الشراء (سطر لكل صنف في كل فاتورة) بعد تطبيق الفلاتر
@@ -3029,6 +3048,7 @@ function purchaseLines(opts){
     const sub = r2(inv.items.reduce((s,x)=> s + num(x.qty)*num(x.price), 0));
     inv.items.forEach(it=>{
       if(f.exclude && f.exclude.length && f.exclude.includes(itemKey(it.name))) return;
+      if(f.excludeCats && f.excludeCats.length && f.excludeCats.includes(itemKey(it.category||''))) return;
       if(f.item && itemKey(it.name) !== itemKey(f.item)) return;
       if(f.category && itemKey(it.category||'') !== itemKey(f.category)) return;
       if(f.unit && it.unit !== f.unit) return;
@@ -3137,7 +3157,7 @@ function renderStats(){
   if(f.item) active.push('الصنف: ' + f.item);
   if(f.category) active.push('التصنيف: ' + f.category);
   if(f.unit) active.push('الوحدة: ' + f.unit);
-  if(excludedItems.length) active.push('مستبعد: ' + excludedItems.map(e=>e.name).join('، '));
+  if(excludedItems.length) active.push('مستبعد: ' + excludedItems.map(e=> (e.type==='cat' ? 'تصنيف ' : '') + e.name).join('، '));
   $('filterHint').textContent = active.length ? active.join(' — ') : 'لا توجد فلاتر — تعرض كل الفواتير الفعّالة';
 }
 
@@ -3495,7 +3515,7 @@ function exportMeta(which){
     period = (f.from || f.to) ? `من ${f.from ? formatDate(f.from) : 'البداية'} إلى ${f.to ? formatDate(f.to) : 'اليوم'}` : 'كل الفترات';
   }
   const br = ($('fltBranch') && $('fltBranch').value) || (currentUserBranch && currentUserBranch !== 'all' ? currentUserBranch : 'كل الفروع');
-  const ex = excludedItems.length ? excludedItems.map(e=>e.name).join('، ') : '';
+  const ex = excludedItems.length ? excludedItems.map(e=> (e.type==='cat' ? 'تصنيف ' : '') + e.name).join('، ') : '';
   return [['الفترة', period], ['الفرع', br + (ex ? '   |   مستبعد: ' + ex : '')]];
 }
 function exportReport(which, kind){
