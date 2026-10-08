@@ -3976,7 +3976,8 @@ async function purgeOrphanReceipts(){
   if(!sb || Date.now() - orphanCheckedAt < 60000) return;
   const known = new Set(invoices.map(i=>i.id));
   const candIds = [...new Set(Object.values(stockReceipts)
-    .filter(r=> r && r.id && r.invoiceId && !known.has(r.invoiceId))
+    // توريدات نظام الشوكولاتة (choco_) ما لها فاتورة بالمشتريات أصلًا — لا تُعتبر يتيمة
+    .filter(r=> r && r.id && r.invoiceId && !String(r.invoiceId).startsWith('choco_') && !known.has(r.invoiceId))
     .map(r=> r.invoiceId))];
   orphanCheckedAt = Date.now();
   if(!candIds.length) return;
