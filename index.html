@@ -2953,7 +2953,7 @@ async function deleteInvoice(e, id){
   const recvd = invRcs.filter(r=> r.status === 'confirmed');
   const msg = 'حذف هذه الفاتورة نهائيًا من القاعدة المشتركة؟ سيختفي عند جميع الموظفين.'
     + (invRcs.length ? '\n\nوبتنحذف توريداتها من نظام المخزون أيضًا.' : '')
-    + (recvd.length ? `\n\n⚠ فيه ${recvd.length} صنف مستلم بالمخزون — كمياته بتنخصم من الرصيد: `
+    + (recvd.length ? `\n\n⚠ فيه ${recvd.length} صنف مستلم بالمخزون — كمياته بتنخصم من الرصيد (إلا اللي انصرف منه، يبقى عشان ما يصير الرصيد سالب): `
         + recvd.map(r=> (r.parts||[]).map(p=>`${p.name} ${p.qty}`).join('، ') || r.name).join(' | ') : '');
   if(!confirm(msg)) return;
   try{
@@ -3969,6 +3969,43 @@ async function syncReceipts(){
   }finally{ invSyncing = false; }
 }
 
+/* حذف وارد مستلم ممكن يخلّي رصيد الصنف بالمخزون سالب لو انصرف منه (هذا سبب الأرصدة السالبة).
+   نحذف حركات الوارد بس لو الرصيد يبقى صفر أو أكثر بكل الأيام، وإلا نخلي الوارد ونعلّم التوريد للإدارة */
+async function buildReceiptPurge(list, reasonMsg){
+  const upd = {}; let removed = 0, kept = 0;
+  const confirmed = list.filter(r=> r.status === 'confirmed');
+  let moves = [], items = {};
+  if(confirmed.length){
+    const [ms, is] = await Promise.all([invRef.child('moves').once('value'), invRef.child('items').once('value')]);
+    moves = Object.values(ms.val() || {}).filter(m=> m && m.id); items = is.val() || {};
+  }
+  const gone = new Set();
+  const minBal = itemId=>{
+    const it = items[itemId] || {};
+    const byDate = {};
+    moves.forEach(m=>{ if(m.itemId !== itemId || gone.has(m.id)) return;
+      byDate[m.date||''] = (byDate[m.date||''] || 0) + (m.type === 'in' ? num(m.qty) : -num(m.qty)); });
+    let b = num(it.opening), min = b;
+    Object.keys(byDate).sort().forEach(d=>{ b += byDate[d]; if(b < min) min = b; });
+    return min;
+  };
+  list.forEach(r=>{
+    if(r.status !== 'confirmed'){ upd['receipts/' + r.id] = null; removed++; return; }
+    const count = Array.isArray(r.parts) && r.parts.length ? r.parts.length : 1;
+    const ids = []; for(let k=0;k<count;k++) ids.push(r.id + '_' + k);
+    ids.forEach(id=> gone.add(id));
+    const touched = [...new Set(moves.filter(m=> ids.includes(m.id)).map(m=> m.itemId))];
+    if(touched.every(itemId=> minBal(itemId) >= -1e-9)){
+      upd['receipts/' + r.id] = null; ids.forEach(id=>{ upd['moves/' + id] = null; }); removed++;
+    }else{
+      ids.forEach(id=> gone.delete(id));
+      upd['receipts/' + r.id + '/invoiceDeleted'] = true;
+      upd['receipts/' + r.id + '/invoiceChanged'] = reasonMsg;
+      kept++;
+    }
+  });
+  return { upd, removed, kept };
+}
 // تنظيف تلقائي (الإدارة فقط): توريد فاتورته انحذفت من المشتريات ← ينحذف من المخزون مع حركاته.
 // يتأكد من Supabase مباشرة إن الفاتورة فعلًا غير موجودة قبل أي حذف.
 let orphanCheckedAt = 0;
@@ -3977,7 +4014,7 @@ async function purgeOrphanReceipts(){
   const known = new Set(invoices.map(i=>i.id));
   const candIds = [...new Set(Object.values(stockReceipts)
     // توريدات نظام الشوكولاتة (choco_) ما لها فاتورة بالمشتريات أصلًا — لا تُعتبر يتيمة
-    .filter(r=> r && r.id && r.invoiceId && !String(r.invoiceId).startsWith('choco_') && !known.has(r.invoiceId))
+    .filter(r=> r && r.id && r.invoiceId && !r.invoiceDeleted && !String(r.invoiceId).startsWith('choco_') && !known.has(r.invoiceId))
     .map(r=> r.invoiceId))];
   orphanCheckedAt = Date.now();
   if(!candIds.length) return;
@@ -3989,33 +4026,24 @@ async function purgeOrphanReceipts(){
   }catch(err){ console.warn('orphan check', err); return; }
   const gone = candIds.filter(id=> !existing.has(id));
   if(!gone.length) return;
-  const upd = {}; let cnt = 0;
-  Object.values(stockReceipts).forEach(r=>{
-    if(!r || !gone.includes(r.invoiceId)) return;
-    upd['receipts/' + r.id] = null; cnt++;
-    if(r.status === 'confirmed'){
-      const count = Array.isArray(r.parts) && r.parts.length ? r.parts.length : 1;
-      for(let k=0;k<count;k++) upd['moves/' + r.id + '_' + k] = null;
-    }
-  });
-  try{ await invRef.update(upd); toast(`تم تنظيف ${cnt} توريد لفواتير محذوفة من المخزون`); }
-  catch(err){ console.error('orphan purge', err); }
+  try{
+    const list = Object.values(stockReceipts).filter(r=> r && !r.invoiceDeleted && gone.includes(r.invoiceId));
+    const { upd, removed, kept } = await buildReceiptPurge(list, 'الفاتورة انحذفت بعد ما انصرف من الكمية — الوارد باقي بالمخزون عشان ما يصير الرصيد سالب');
+    if(!Object.keys(upd).length) return;
+    await invRef.update(upd);
+    toast(`تم تنظيف ${removed} توريد لفواتير محذوفة من المخزون` + (kept ? ` — و${kept} انصرف منها فبقيت بالمخزون` : ''));
+  }catch(err){ console.error('orphan purge', err); }
 }
 // حذف الفاتورة = حذف توريداتها من المخزون، ولو كانت مستلمة تنحذف حركات الوارد معها (خصم من الرصيد)
 async function purgeReceiptsForInvoice(invId){
   if(!invReady || !invRef) return;
-  const upd = {};
-  Object.values(stockReceipts).forEach(r=>{
-    if(!r || r.invoiceId !== invId) return;
-    upd['receipts/' + r.id] = null;
-    if(r.status === 'confirmed'){
-      const count = Array.isArray(r.parts) && r.parts.length ? r.parts.length : 1;
-      for(let k=0;k<count;k++) upd['moves/' + r.id + '_' + k] = null;
-    }
-  });
-  if(!Object.keys(upd).length) return;
-  try{ await invRef.update(upd); toast('انحذفت الفاتورة وتوريداتها من المخزون'); }
-  catch(err){ console.error('purge receipts', err); toast('انحذفت الفاتورة لكن تعذّر حذفها من المخزون — بلّغني'); }
+  try{
+    const list = Object.values(stockReceipts).filter(r=> r && r.invoiceId === invId);
+    const { upd, kept } = await buildReceiptPurge(list, 'الفاتورة انحذفت بعد ما انصرف من الكمية — الوارد باقي بالمخزون عشان ما يصير الرصيد سالب');
+    if(!Object.keys(upd).length) return;
+    await invRef.update(upd);
+    toast(kept ? `انحذفت الفاتورة — ${kept} صنف انصرف منه فبقي وارده بالمخزون (ما ينخصم عشان ما يصير سالب)` : 'انحذفت الفاتورة وتوريداتها من المخزون');
+  }catch(err){ console.error('purge receipts', err); toast('انحذفت الفاتورة لكن تعذّر حذفها من المخزون — بلّغني'); }
 }
 async function cancelReceiptsForInvoice(invId){
   if(!invReady || !invRef) return;
