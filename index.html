@@ -1853,8 +1853,8 @@ $('btnCancelEdit').addEventListener('click', ()=>{
 });
 
 // فتح فاتورة محفوظة داخل النموذج للتعديل
+// التعديل مسموح لكل الموظفين (يتسجّل بسجل التعديلات باسم من عدّل)، والإلغاء والحذف للإدارة فقط
 function editInvoice(id){
-  if(!isAdmin()){ toast('تعديل الفواتير من صلاحية الإدارة فقط'); return; }
   const inv = invoices.find(i=>i.id===id);
   if(!inv){ toast('لم يتم العثور على الفاتورة'); return; }
   if(inv.status === 'cancelled'){ toast('الفاتورة ملغاة — أعد تفعيلها أولًا قبل التعديل'); return; }
@@ -2896,7 +2896,9 @@ function renderLog(){
             : `<button onclick="editInvoice('${inv.id}')">تعديل</button>
                <button onclick="setInvoiceStatus('${inv.id}','cancelled')">إلغاء الفاتورة</button>`}
           <button class="danger" onclick="deleteInvoice(event,'${inv.id}')">حذف نهائي</button>
-        </div>` : ''}
+        </div>` : (!cancelled ? `<div class="mini-actions" style="margin-top:12px;">
+          <button onclick="editInvoice('${inv.id}')">تعديل</button>
+        </div>` : '')}
       </div>
     </details>`;
   }).join('');
