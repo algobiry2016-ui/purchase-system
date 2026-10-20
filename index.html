@@ -1955,6 +1955,7 @@ function diffInvoices(oldInv, newInv){
     if(r2(o.qty)   !== r2(n.qty))   changes.push({ field:`الكمية — ${o.name}`, from:String(r2(o.qty)), to:String(r2(n.qty)) });
     if(r2(o.price) !== r2(n.price)) changes.push({ field:`سعر الشراء — ${o.name}`, from:r2(o.price).toFixed(2), to:r2(n.price).toFixed(2) });
     if(o.unit !== n.unit)           changes.push({ field:`الوحدة — ${o.name}`, from:o.unit, to:n.unit });
+    if((o.category||'') !== (n.category||'')) changes.push({ field:`التصنيف — ${o.name}`, from:o.category||'—', to:n.category||'—' });
     if((o.origin||'') !== (n.origin||'')) changes.push({ field:`المنشأ — ${o.name}`, from:o.origin||'—', to:n.origin||'—' });
     if(!!o.stock !== !!n.stock)     changes.push({ field:`مخزني — ${o.name}`, from:o.stock?'نعم':'لا', to:n.stock?'نعم':'لا' });
   });
