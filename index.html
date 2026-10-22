@@ -322,6 +322,7 @@
           <span id="syncLabel" style="font-size:12px;color:#B9C2B9;">جارٍ الاتصال…</span>
           <button id="btnSyncNow" style="background:transparent;border:1px solid #3A5145;color:#B9C2B9;font-family:inherit;font-size:11.5px;padding:2px 8px;border-radius:3px;cursor:pointer;">تحديث</button>
           <button id="invState" type="button" title="ربط نظام المخزون">المخزون…</button>
+          <button id="btnStaffEdits" type="button" style="display:none;background:transparent;border:1px solid #3A5145;color:#F3E3B5;font-family:inherit;font-size:11.5px;padding:2px 8px;border-radius:3px;cursor:pointer;">🔔 تعديلات الموظفين</button>
         </div>
       </div>
     </div>
@@ -2040,7 +2041,7 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
     });
     if(qtyChanged.length && !confirm('تنبيه: هالأصناف مستلمة بالمخزون وتغيّرت كميتها:\n' + qtyChanged.join('\n')
       + '\n\nرصيد المخزون ما يتغيّر تلقائيًا. لو الكمية اللي وصلت فعلًا غير، بلّغ يوسف يعدّل حركة الوارد أو يسوي «جرد».\n\nمتابعة الحفظ؟')) return;
-    invoice.editLog.push({ at: now, by: userName || '', changes });
+    invoice.editLog.push({ at: now, by: userName || '', email: currentUserEmail || '', role: isAdmin() ? 'admin' : 'staff', changes });
   }
 
   const btn = $('btnSaveInvoice');
@@ -2396,6 +2397,7 @@ async function pullInvoices(silent){
     }
     invoices = rows;
     online = true;
+    paintStaffEdits();
     cacheLocally();
     refreshDatalists();
     const pend = pendingCount();
@@ -2411,6 +2413,43 @@ async function pullInvoices(silent){
     return false;
   }
 }
+
+// ---- تنبيهات الإدارة: كل تعديل فاتورة سواه موظف (أشرف، يوسف، أحمد) ----
+const STAFF_SEEN_KEY = 'ps-staff-edits-seen';
+const staffSeen = () => { try{ return +localStorage.getItem(STAFF_SEEN_KEY) || 0; }catch(e){ return 0; } };
+const editAt = e => typeof e.at === 'number' ? e.at : (Date.parse(e.at) || 0);
+// التعديلات القديمة (قبل تسجيل الدور) تنحسب للموظف لو ما كانت باسم الإدارة
+const isStaffEdit = e => e.role ? e.role === 'staff' : !/رؤوف|سعود/.test(String(e.by || ''));
+function staffEdits(){
+  const out = [];
+  invoices.forEach(inv => (inv.editLog || []).forEach(e => { if(isStaffEdit(e)) out.push({ inv, e }); }));
+  return out.sort((a,b) => editAt(b.e) - editAt(a.e));
+}
+function paintStaffEdits(){
+  const b = $('btnStaffEdits'); if(!b) return;
+  if(!isAdmin()){ b.style.display = 'none'; return; }
+  const n = staffEdits().filter(x => editAt(x.e) > staffSeen()).length;
+  b.style.display = ''; b.textContent = '🔔 تعديلات الموظفين' + (n ? ` (${n})` : '');
+  b.style.borderColor = n ? '#D9A441' : '#3A5145';
+}
+$('btnStaffEdits').addEventListener('click', ()=>{
+  const seen = staffSeen(), list = staffEdits().slice(0, 150);
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  ov.innerHTML = `<div style="background:#fff;border-radius:8px;max-width:760px;width:100%;max-height:88vh;overflow:auto;padding:16px;direction:rtl;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+      <b style="font-size:16px;">تعديلات الموظفين على الفواتير</b>
+      <span><button class="btn" id="seStaffSeen">تم الاطلاع</button> <button class="btn btn-outline" id="seStaffClose">إغلاق</button></span></div>
+    ${list.length ? list.map(({inv, e}) => `<div style="border:1px solid #E3E6DF;border-radius:6px;padding:9px 11px;margin-bottom:8px;${editAt(e) > seen ? 'background:#FBF3DF;' : ''}">
+      <div><b>${escapeHtml(e.by || 'غير معروف')}</b> — فاتورة ${escapeHtml(inv.number)} (${escapeHtml(inv.supplier)}) — <span style="color:#6B746B;font-size:12px;">${new Date(editAt(e)).toLocaleString('ar-SA-u-nu-latn')}</span></div>
+      <div style="font-size:13px;margin-top:4px;">${(e.changes || []).map(c => `• ${escapeHtml(c.field)}: <b>${escapeHtml(c.from)}</b> ← <b>${escapeHtml(c.to)}</b>`).join('<br>')}</div></div>`).join('')
+      : '<p style="color:#6B746B;">ما فيه تعديلات من الموظفين.</p>'}</div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', ev => { if(ev.target === ov) close(); });
+  ov.querySelector('#seStaffClose').onclick = close;
+  ov.querySelector('#seStaffSeen').onclick = () => { try{ localStorage.setItem(STAFF_SEEN_KEY, String(Date.now())); }catch(e){} close(); paintStaffEdits(); };
+});
 
 // إعادة رسم الشاشة الظاهرة حاليًا بعد التحديث
 function repaintActive(){
