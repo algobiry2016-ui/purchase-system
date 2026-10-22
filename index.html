@@ -1701,7 +1701,17 @@ function updateItemField(i, field, value){
   }
   recalcInvoice();
 }
-function removeItem(i){ currentItems.splice(i,1); renderItemsTable(); }
+function removeItem(i){
+  // حذف سطر قبل سطر بنفس الصنف والوحدة ومستلم بالمخزون يغيّر ترتيب السطر المستلم، فيرجع ليوسف كتوريد جديد ويتأكد مرتين
+  if(editingId){
+    const rids = lineRids(editingId, currentItems), key = it => itemKey(it.name) + '|' + itemKey(it.unit);
+    const k = key(currentItems[i]);
+    if(currentItems.some((it, j)=> j > i && key(it) === k && isLockedLine(rids[j]))){
+      toast('ما ينفع تحذف هذا السطر: فيه سطر بعده بنفس الصنف مستلم بالمخزون. عدّل كميته بدل الحذف.'); return;
+    }
+  }
+  currentItems.splice(i,1); renderItemsTable();
+}
 
 // ============================================================
 //  محرّك حساب الفاتورة: الأصناف → الخصم → الضريبة → الصافي
@@ -2020,6 +2030,16 @@ $('btnSaveInvoice').addEventListener('click', async ()=>{
       toast('لا يوجد أي تغيير على الفاتورة');
       return;
     }
+    // صنف مستلم بالمخزون وتغيّرت كميته: المخزون ما يتعدّل تلقائيًا (يوسف سجّل اللي وصل فعلًا)
+    const oldR = lineRids(editingOriginal.id, editingOriginal.items), newR = lineRids(invoice.id, invoice.items);
+    const qtyChanged = [];
+    (editingOriginal.items||[]).forEach((o, ix)=>{
+      const rid = oldR[ix]; if(!isLockedLine(rid)) return;
+      const j = newR.indexOf(rid), n = j >= 0 ? invoice.items[j] : null;
+      if(n && r2(num(n.qty)) !== r2(num(o.qty))) qtyChanged.push(`${o.name}: ${r2(num(o.qty))} ← ${r2(num(n.qty))}`);
+    });
+    if(qtyChanged.length && !confirm('تنبيه: هالأصناف مستلمة بالمخزون وتغيّرت كميتها:\n' + qtyChanged.join('\n')
+      + '\n\nرصيد المخزون ما يتغيّر تلقائيًا. لو الكمية اللي وصلت فعلًا غير، بلّغ يوسف يعدّل حركة الوارد أو يسوي «جرد».\n\nمتابعة الحفظ؟')) return;
     invoice.editLog.push({ at: now, by: userName || '', changes });
   }
 
@@ -3926,9 +3946,23 @@ async function syncReceipts(){
       const rids = lineRids(inv.id, inv.items);
       inv.items.forEach((it, ix)=>{ if(rids[ix]) desired[rids[ix]] = { inv, it }; });
     });
+    // توريدات مستلمة لنفس الفاتورة ونفس الصنف/الوحدة صار رقمها الداخلي غير مطلوب (مثلًا انحذف سطر مكرر قبلها
+    // فتغيّر ترتيبها). هذي نعتبرها نفس السطر، وما ننشئ له توريد جديد — كان يرجع ليوسف معلّق ويتأكد مرتين
+    const lineKey = (invId, name, unit) => invId + '|' + itemKey(name) + '|' + itemKey(unit);
+    const shifted = {};
+    Object.values(stockReceipts).forEach(r=>{
+      if(r && r.id && r.status === 'confirmed' && !desired[r.id] && byId[r.invoiceId] && !isStale(r.invoiceId)){
+        (shifted[lineKey(r.invoiceId, r.name, r.unit)] = shifted[lineKey(r.invoiceId, r.name, r.unit)] || []).push(r.id);
+      }
+    });
+    const reused = new Set();
     Object.keys(desired).forEach(rid=>{
       const { inv, it } = desired[rid];
       const ex = stockReceipts[rid];
+      if(!ex){
+        const pool = shifted[lineKey(inv.id, it.name, it.unit)];
+        if(pool && pool.length){ reused.add(pool.shift()); return; }
+      }
       const fields = {
         invoiceNo: inv.number || '', supplier: inv.supplier || '', invoiceDate: inv.date || '',
         name: it.name, unit: it.unit || '', category: it.category || '', qty: r2(num(it.qty)),
@@ -3953,6 +3987,9 @@ async function syncReceipts(){
         Object.keys(fields).forEach(k=>{
           if(String(ex[k] == null ? '' : ex[k]) !== String(fields[k])) upd['receipts/' + rid + '/' + k] = fields[k];
         });
+        // فرع الفاتورة تغيّر: التوريد المعلّق ينتقل لمخزون الفرع الصحيح
+        const br = INV_BRANCH_MAP[inv.branch || DEFAULT_BRANCH] || (inv.branch || DEFAULT_BRANCH);
+        if(ex.branch !== br){ upd['receipts/' + rid + '/branch'] = br; upd['receipts/' + rid + '/purchaseBranch'] = inv.branch || DEFAULT_BRANCH; }
       }else if(ex.status === 'confirmed' && isAdmin()){
         const msg = r2(num(ex.qty)) !== fields.qty
           ? `الكمية بالفاتورة تغيّرت من ${r2(num(ex.qty))} إلى ${fields.qty} بعد الاستلام — راجع رصيد المخزون` : '';
@@ -3962,7 +3999,7 @@ async function syncReceipts(){
     });
     // أسطر انشالت أو تغيّر اسمها بالفاتورة، أو فاتورة انلغت
     Object.values(stockReceipts).forEach(r=>{
-      if(!r || !r.id || desired[r.id] || !byId[r.invoiceId] || isStale(r.invoiceId)) return;
+      if(!r || !r.id || desired[r.id] || reused.has(r.id) || !byId[r.invoiceId] || isStale(r.invoiceId)) return;
       if(r.status === 'pending' || r.status === 'cancelled'){
         // التوريد المعلّق ينحذف تمامًا (ما ينترك "ملغى" يلخبط السجل)
         upd['receipts/' + r.id] = null;
