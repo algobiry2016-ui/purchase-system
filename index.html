@@ -2911,7 +2911,7 @@ function renderLog(){
     const edited = (inv.editLog||[]).length > 0;
     const due = r2(inv.total - (inv.paidAmount||0));
     const rids = lineRids(inv.id, inv.items);
-    const pendStock = cancelled ? 0 : rids.filter(r=> r && (!stockReceipts[r] || stockReceipts[r].status==='pending')).length;
+    const pendStock = (cancelled || !linkedInv(inv)) ? 0 : rids.filter(r=> r && (!stockReceipts[r] || stockReceipts[r].status==='pending')).length;
     return `
     <details class="log-item${cancelled ? ' row-cancelled' : ''}">
       <summary>
@@ -3723,6 +3723,10 @@ const flagKey = name => 'f' + hashStr(itemKey(name));
 function flagFor(name){ return (stockFlags && stockFlags[flagKey(name)]) || null; }
 
 // معرّف التوريد لكل سطر مخزني بالفاتورة (ثابت، فما يتكرر التوريد لو انحفظت الفاتورة أكثر من مرة)
+// بداية الربط مع المخزون: فواتير قبل هالتاريخ بضاعتها دخلت المخزون يدوي (أو انصرفت) قبل الربط،
+// فما ترسل توريدات أبدًا حتى لو انعدلت — وإلا يتأكد توريد لبضاعة صار لها أسابيع ويرتفع الرصيد بدون شي فعلي
+const STOCK_LINK_START = '2026-09-29';
+const linkedInv = inv => !!inv && String(inv.date || '') >= STOCK_LINK_START;
 function lineRids(invId, items){
   const occ = {};
   return (items||[]).map(it=>{
@@ -3981,7 +3985,7 @@ async function syncReceipts(){
     invoices.forEach(inv=>{ byId[inv.id] = inv; });
     const isStale = id => byId[id] && ver(byId[id]) < (maxVer[id] || 0);
     invoices.forEach(inv=>{
-      if(inv.status === 'cancelled' || isStale(inv.id)) return;
+      if(inv.status === 'cancelled' || isStale(inv.id) || !linkedInv(inv)) return;
       const rids = lineRids(inv.id, inv.items);
       inv.items.forEach((it, ix)=>{ if(rids[ix]) desired[rids[ix]] = { inv, it }; });
     });
@@ -4042,7 +4046,7 @@ async function syncReceipts(){
       if(r.status === 'pending' || r.status === 'cancelled'){
         // التوريد المعلّق ينحذف تمامًا (ما ينترك "ملغى" يلخبط السجل)
         upd['receipts/' + r.id] = null;
-      }else if(r.status === 'confirmed' && isAdmin()){
+      }else if(r.status === 'confirmed' && isAdmin() && linkedInv(byId[r.invoiceId])){
         const msg = 'الصنف انشال أو تغيّر اسمه بالفاتورة بعد الاستلام — راجع رصيد المخزون';
         if(r.invoiceChanged !== msg) adminUpd['receipts/' + r.id + '/invoiceChanged'] = msg;
       }
