@@ -142,6 +142,7 @@
 
   table{width:100%;min-width:560px;border-collapse:collapse;font-size:13.5px;}
   .card-body{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   th{
     text-align:right;font-size:12px;color:var(--muted);font-weight:600;
     padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;
@@ -429,12 +430,14 @@
           </div>
         </div>
 
+        <div class="table-scroll">
         <table class="items-table">
           <thead><tr><th>الصنف</th><th style="width:150px;">التصنيف</th><th style="width:120px;">الوحدة</th><th style="width:100px;">الكمية</th><th style="width:120px;">سعر الوحدة</th><th>إجمالي الصنف</th><th style="width:110px;">مخزني</th><th style="width:55px;"></th></tr></thead>
           <tbody id="itemsBody">
             <tr class="empty-row"><td colspan="8">لم تتم إضافة أي صنف بعد</td></tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div class="card">
