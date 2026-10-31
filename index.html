@@ -704,6 +704,11 @@
       </div>
 
       <div class="card">
+        <div class="card-head"><h2>مشتريات الشهر يوم بيوم</h2><span class="hint" id="monthDaysHint"></span></div>
+        <div class="card-body" id="monthDaysBody" style="padding:0;"></div>
+      </div>
+
+      <div class="card">
         <div class="card-head">
           <h2>تقرير بين تاريخين (حسب الفلاتر)</h2>
           <div style="display:flex;gap:8px;">
@@ -3400,7 +3405,7 @@ function renderDaily(){
 
 function renderMonthly(){
   const month = $('monthlyMonth').value;
-  if(!month){ $('monthlyBody').innerHTML = `<div class="empty-state" style="padding:30px;"><div class="big">🗓️</div>اختر شهرًا لعرض مشتريات الشهر</div>`; lastMonthlyCats=[]; lastMonthlyLines=[]; return; }
+  if(!month){ $('monthlyBody').innerHTML = `<div class="empty-state" style="padding:30px;"><div class="big">🗓️</div>اختر شهرًا لعرض مشتريات الشهر</div>`; lastMonthlyCats=[]; lastMonthlyLines=[]; renderMonthDays(month, []); return; }
   const lines = purchaseLines({ month, from:'', to:'' });
   lastMonthlyLines = lines;
   const [y,m] = month.split('-');
@@ -3409,6 +3414,49 @@ function renderMonthly(){
     emptyMsg: 'لا توجد مشتريات في هذا الشهر',
     showPrices: true
   });
+  renderMonthDays(month, lines);
+}
+
+// ---- مشتريات الشهر يوم بيوم: كل يوم فيه شراء بسطر، والضغط عليه يفتح تقرير اليوم ----
+const dayNamesAr = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function dayNameOf(d){
+  const [y,m,dd] = d.split('-').map(Number);
+  return dayNamesAr[new Date(y, m-1, dd).getDay()];
+}
+function renderMonthDays(month, lines){
+  const el = $('monthDaysBody');
+  if(!el) return;
+  if(!month){ $('monthDaysHint').textContent = ''; el.innerHTML = `<div class="empty-state" style="padding:30px;"><div class="big">🗓️</div>اختر شهرًا من التقرير الشهري</div>`; return; }
+  const [y,m] = month.split('-');
+  $('monthDaysHint').textContent = monthNamesAr[parseInt(m,10)-1] + ' ' + y;
+  const byDay = {};
+  lines.forEach(l=>{
+    const d = byDay[l.date] || (byDay[l.date] = { date:l.date, inv:new Set(), total:0, cash:0, credit:0 });
+    d.inv.add(l.invoiceId); d.total += l.total; d.cash += l.paidShare; d.credit += l.dueShare;
+  });
+  const days = Object.values(byDay).sort((a,b)=> a.date < b.date ? -1 : 1);
+  if(!days.length){ el.innerHTML = `<div class="empty-state" style="padding:30px;"><div class="big">—</div>لا توجد مشتريات في هذا الشهر</div>`; return; }
+  const sum = r2(days.reduce((s,d)=>s+d.total,0));
+  el.innerHTML = `
+    <table>
+      <thead><tr><th>اليوم</th><th>إجمالي المشتريات</th><th>عدد الفواتير</th><th>نقدي</th><th>آجل</th></tr></thead>
+      <tbody>
+        ${days.map(d=>`<tr>
+          <td><span class="clickable" onclick="openDailyReport('${d.date}')">${dayNameOf(d.date)} ▾</span>
+            <div style="font-size:11.5px;color:var(--muted);">${formatDate(d.date)}</div></td>
+          <td class="num"><b>${r2(d.total).toFixed(2)}</b></td>
+          <td class="num">${d.inv.size}</td>
+          <td class="num">${r2(d.cash).toFixed(2)}</td>
+          <td class="num">${r2(d.credit).toFixed(2)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="rep-total"><span>أيام فيها مشتريات: ${days.length} · المتوسط اليومي: ${(sum/days.length).toFixed(2)} ر.س</span><b>${money(sum)}</b></div>`;
+}
+function openDailyReport(day){
+  $('dailyDate').value = day;
+  renderDaily();
+  $('dailyBody').closest('.card').scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
 function renderRange(){
