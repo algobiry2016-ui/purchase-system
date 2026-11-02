@@ -226,6 +226,14 @@
   #invLinkModal h3{margin:0 0 6px;font-size:16px;color:var(--forest);}
   #invLinkModal p{margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.7;}
   #invLinkErr{color:var(--clay);font-size:12.5px;min-height:1.2em;margin-top:8px;}
+  #newPassModal{position:fixed;inset:0;background:rgba(18,39,32,.55);display:none;align-items:center;justify-content:center;z-index:10001;padding:18px;}
+  #newPassModal .box{background:#fff;border-radius:6px;max-width:380px;width:100%;padding:20px;border-top:3px solid var(--gold);}
+  #newPassModal h3{margin:0 0 6px;font-size:16px;color:var(--forest);}
+  #newPassModal p{margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.7;}
+  #newPassModal .field{margin-bottom:11px;}
+  #newPassModal input{width:100%;}
+  #newPassErr{color:var(--clay);font-size:12.5px;min-height:1.2em;margin-top:4px;}
+  .link-btn{background:none;border:none;color:var(--forest);font-family:inherit;font-size:12.5px;cursor:pointer;padding:8px 0 0;text-decoration:underline;}
   .flaglog{font-size:12.5px;}
   .flaglog td{white-space:normal;}
   .mini-actions button{padding:5px 10px;font-size:12px;border-radius:4px;border:1px solid var(--line);background:#fff;cursor:pointer;font-family:inherit;color:var(--ink);}
@@ -309,6 +317,7 @@
       <input type="password" id="loginPass" dir="ltr" autocomplete="current-password" placeholder="••••••••">
     </div>
     <button class="btn btn-primary btn-block" id="btnLogin">دخول</button>
+    <button type="button" class="link-btn" id="btnForgotPass">نسيت كلمة المرور؟</button>
     <div id="loginMsg"></div>
   </div>
 </div>
@@ -829,6 +838,16 @@
       <button class="btn btn-primary" id="btnInvLink" style="flex:1;">ربط</button>
       <button class="btn" id="btnInvLater">لاحقًا</button>
     </div>
+  </div>
+</div>
+<div id="newPassModal">
+  <div class="box">
+    <h3>كلمة مرور جديدة</h3>
+    <p>اكتب كلمة المرور الجديدة لحسابك (6 خانات أو أكثر).</p>
+    <div class="field"><label>كلمة المرور الجديدة</label><input type="password" id="newPass1" dir="ltr" autocomplete="new-password"></div>
+    <div class="field"><label>أعد كتابتها</label><input type="password" id="newPass2" dir="ltr" autocomplete="new-password"></div>
+    <div id="newPassErr"></div>
+    <button class="btn btn-primary btn-block" id="btnSaveNewPass" style="margin-top:8px;">حفظ كلمة المرور</button>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -2291,6 +2310,11 @@ async function connect(){
   }
 }
 
+// ---- استعادة كلمة المرور: نقرأ الرابط قبل ما تمسحه مكتبة Supabase ----
+const AUTH_HASH = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+const IS_RECOVERY_LINK = AUTH_HASH.get('type') === 'recovery';
+const RECOVERY_LINK_ERROR = AUTH_HASH.get('error_code') || AUTH_HASH.get('error') || '';
+
 // ---- تسجيل الدخول ----
 function createClientOnly(){
   const conn = getConn();
@@ -2366,6 +2390,47 @@ async function doLogin(){
 }
 
 $('btnLogin').addEventListener('click', doLogin);
+
+$('btnForgotPass').addEventListener('click', async ()=>{
+  const email = $('loginEmail').value.trim();
+  const msg = $('loginMsg');
+  if(!email){ msg.textContent = 'اكتب بريدك الإلكتروني فوق، وبعدين اضغط «نسيت كلمة المرور»'; $('loginEmail').focus(); return; }
+  if(!createClientOnly()){ msg.textContent = 'تعذّر الاتصال بالخادم — تحقق من الإنترنت'; return; }
+  const btn = $('btnForgotPass'); btn.disabled = true;
+  try{
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if(error) throw error;
+    msg.style.color = 'var(--forest)';
+    msg.textContent = 'أرسلنا رابط تغيير كلمة المرور على بريدك. افتحه من هذا الجهاز (وشيك على الرسائل غير المرغوبة).';
+  }catch(err){
+    console.error('reset password', err);
+    msg.style.color = '';
+    msg.textContent = (err && err.status === 429) ? 'طلبات كثيرة — جرّب بعد شوي' : 'تعذّر إرسال الرابط — تحقق من البريد والاتصال';
+  }finally{ btn.disabled = false; }
+});
+
+function openNewPassModal(){
+  $('newPass1').value = ''; $('newPass2').value = ''; $('newPassErr').textContent = '';
+  $('newPassModal').style.display = 'flex';
+  setTimeout(()=>$('newPass1').focus(), 50);
+}
+$('newPass2').addEventListener('keydown', e=>{ if(e.key==='Enter') $('btnSaveNewPass').click(); });
+$('btnSaveNewPass').addEventListener('click', async ()=>{
+  const p1 = $('newPass1').value, p2 = $('newPass2').value, err = $('newPassErr');
+  if(p1.length < 6){ err.textContent = 'كلمة المرور لازم تكون 6 خانات أو أكثر'; return; }
+  if(p1 !== p2){ err.textContent = 'الكلمتين مو متطابقتين'; return; }
+  const btn = $('btnSaveNewPass'); btn.disabled = true; err.textContent = '';
+  try{
+    const { error } = await sb.auth.updateUser({ password: p1 });
+    if(error) throw error;
+    $('newPassModal').style.display = 'none';
+    toast('تم تغيير كلمة المرور');
+    linkInventory(p1);   // يوحّد كلمة مرور المخزون مع الجديدة
+  }catch(e){
+    console.error('update password', e);
+    err.textContent = (e && /different from the old/i.test(e.message||'')) ? 'اختر كلمة مرور غير القديمة' : 'تعذّر حفظ كلمة المرور — جرّب مرة ثانية';
+  }finally{ btn.disabled = false; }
+});
 $('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 $('loginEmail').addEventListener('keydown', e=>{ if(e.key==='Enter') $('loginPass').focus(); });
 
@@ -4472,12 +4537,17 @@ function setCmpPeriod(months){
     $('loginMsg').textContent = 'إعدادات الاتصال ناقصة في هذا الملف';
     return;
   }
+  if(RECOVERY_LINK_ERROR){
+    $('loginMsg').textContent = 'رابط تغيير كلمة المرور منتهي أو مستخدم — اطلب رابط جديد من «نسيت كلمة المرور»';
+  }
   try{
     const { data } = await sb.auth.getSession();
     if(data && data.session && applySession(data.session)){
+      if(IS_RECOVERY_LINK) history.replaceState(null, '', location.pathname + location.search);
       loadCache();
       await startApp();
-      linkInventory(null);
+      if(IS_RECOVERY_LINK) openNewPassModal();
+      else linkInventory(null);
     }
   }catch(err){ console.error('session check', err); }
 })();
